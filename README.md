@@ -2,7 +2,7 @@
 
 Vectora is a browser-based 2D CAD and vector drawing app for creating precise artwork, laser-cut outlines, engraving designs, sticker artwork and editable mechanical profiles. Work in millimetres on an infinite or measured canvas, then save your projects or export them for other applications.
 
-**[Open Vectora on GitHub Pages](https://laurencecarrington.github.io/Vectora/)** — no installation required.
+**[Open Vectora on GitHub Pages](https://laurencecarrington.github.io/vectora/)** — no installation required.
 
 ## What you can do
 
@@ -17,7 +17,7 @@ Vectora is a browser-based 2D CAD and vector drawing app for creating precise ar
 
 ## Getting started
 
-1. [Open the app](https://laurencecarrington.github.io/Vectora/). Choose **Infinite**, a **Machine beds** or **Sticker sheets** preset, or enter a custom canvas size. Choose the grid pattern and spacing, then create your document.
+1. [Open the app](https://laurencecarrington.github.io/vectora/). Choose **Infinite**, a **Machine beds** or **Sticker sheets** preset, or enter a custom canvas size. Choose the grid pattern and spacing, then create your document.
 2. Open **Layers** on the right toolbar and click the layer you want to draw in. New shapes go into the active layer, which must be visible and unlocked.
 3. Choose a drawing tool on the left toolbar. For example, press **R** and drag to draw a rectangle, then press **V** to return to Select.
 4. Select your object and open **Properties** on the right for exact position, dimensions, rotation, line style and line weight in millimetres.
