@@ -17,7 +17,7 @@ test('Colour fill toolbar picks colours, fills only the clicked region and recol
   await page.goto(DEV);const click=await page.evaluate(()=>{const e=(window as any).__vectora,p=(window as any).__paper;const start=p.view.viewToProject(new p.Point(360,310));for(const offset of [[0,0],[20,20]])e.addShape(new p.Path.Rectangle({insert:false,rectangle:[start.x+offset[0],start.y+offset[1],40,40],strokeColor:'#383838',strokeWidth:1.5,strokeScaling:false}),'Rectangle');const point=p.view.projectToView(start.add([30,30]));return {x:point.x,y:point.y};});
   await page.getByRole('button',{name:'Colour fill',exact:true}).click();await expect(page.getByRole('dialog',{name:'Fill colour',exact:true})).toHaveCount(0);const menu=page.getByRole('region',{name:'Fill & appearance',exact:true});await menu.getByRole('textbox',{name:'Hex colour',exact:true}).fill('#0000FF');await menu.getByRole('textbox',{name:'Hex colour',exact:true}).press('Enter');const box=(await page.locator('#cad-canvas').boundingBox())!;await page.mouse.click(box.x+click.x,box.y+click.y);
   expect(await page.evaluate(()=>{const e=(window as any).__vectora,s=e.selected;return {count:e.objects.length,name:s.data.name,color:s.fillColor.toCSS(true),area:Number(s.area.toFixed(8)),stroke:s.strokeColor,tool:e.tool,originals:e.objects.filter((x:any)=>!x.data.regionFill).every((x:any)=>!x.fillColor)};})).toEqual({count:3,name:'Colour fill',color:'#0000ff',area:400,stroke:null,tool:'fill',originals:true});await expect(page.locator('#properties-panel')).toBeHidden();
-  await menu.getByRole('textbox',{name:'Hex colour',exact:true}).fill('#E99A42');await menu.getByRole('textbox',{name:'Hex colour',exact:true}).press('Enter');await page.locator('#cad-canvas').focus();expect(await page.evaluate(()=>(window as any).__vectora.objects.length)).toBe(3);expect(await page.evaluate(()=>(window as any).__vectora.selected.fillColor.toCSS(true))).toBe('#e99a42');
+  await page.getByRole('button',{name:'Colour fill',exact:true}).click();await menu.getByRole('textbox',{name:'Hex colour',exact:true}).fill('#E99A42');await menu.getByRole('textbox',{name:'Hex colour',exact:true}).press('Enter');await page.locator('#cad-canvas').focus();expect(await page.evaluate(()=>(window as any).__vectora.objects.length)).toBe(3);expect(await page.evaluate(()=>(window as any).__vectora.selected.fillColor.toCSS(true))).toBe('#e99a42');
   await page.keyboard.press('Control+z');expect(await page.evaluate(()=>(window as any).__vectora.selected.fillColor.toCSS(true))).toBe('#0000ff');await page.keyboard.press('Control+z');expect(await page.evaluate(()=>(window as any).__vectora.objects.length)).toBe(2);await page.keyboard.press('Control+Shift+z');expect(await page.evaluate(()=>(window as any).__vectora.objects.length)).toBe(3);await page.screenshot({path:'test-results/colour-fill.png'});
 });
 
@@ -96,7 +96,7 @@ test('No fill swatch clears a whole fill from the canvas and a colour exits clea
   await page.getByRole('button',{name:'Colour fill',exact:true}).click();await page.getByRole('button',{name:'No fill',exact:true}).click();await expect(page.getByRole('button',{name:'No fill',exact:true})).toHaveAttribute('aria-pressed','true');
   const box=(await page.locator('#cad-canvas').boundingBox())!;await page.mouse.click(box.x+point.x,box.y+point.y);
   expect(await page.evaluate(()=>(window as any).__vectora.objects.map((x:any)=>({fill:x.fillColor,name:x.data.name})))).toEqual([{fill:null,name:'Rectangle'}]);
-  await page.getByRole('textbox',{name:'Hex colour',exact:true}).fill('#FF00FF');await page.getByRole('textbox',{name:'Hex colour',exact:true}).press('Enter');await expect(page.getByRole('button',{name:'No fill',exact:true})).toHaveAttribute('aria-pressed','false');await page.mouse.click(box.x+point.x,box.y+point.y);
+  await page.getByRole('button',{name:'Colour fill',exact:true}).click();await page.getByRole('textbox',{name:'Hex colour',exact:true}).fill('#FF00FF');await page.getByRole('textbox',{name:'Hex colour',exact:true}).press('Enter');await expect(page.getByRole('button',{name:'No fill',exact:true})).toHaveAttribute('aria-pressed','false');await page.mouse.click(box.x+point.x,box.y+point.y);
   expect(await page.evaluate(()=>(window as any).__vectora.selected.fillColor.toCSS(true))).toBe('#ff00ff');
 });
 
@@ -179,4 +179,28 @@ test('A surrounding border does not block local Fill in a large drawing',async({
   const border=new p.Path.Rectangle({insert:false,rectangle:[-5,-5,1010,1010]});border.data={uid:crypto.randomUUID(),role:'artwork',name:'Border'};e.artwork.addChild(border);
   const region=regionAt(e.objects,new p.Point(5,5))!;const result={area:region.area,clicked:region.contains(new p.Point(5,5)),neighbour:region.contains(new p.Point(25,5))};region.remove();return result;
  });expect(result).toEqual({area:100,clicked:true,neighbour:false});
+});
+
+test('Fill remains active across repeated clicks on separate and partitioned canvas regions',async({page})=>{
+ await page.goto(DEV);
+ await page.getByRole('button',{name:'Colour fill',exact:true}).click();
+ await page.waitForFunction(()=>{const p=(window as any).__paper,c=document.querySelector<HTMLCanvasElement>('#cad-canvas');return !!c&&Math.abs(p.view.viewSize.width-c.clientWidth)<1&&Math.abs(p.view.viewSize.height-c.clientHeight)<1;});
+ const projectPoints=await page.evaluate(()=>{
+  const p=(window as any).__paper,e=(window as any).__vectora;
+  const separate=new p.Point(70,0);
+  for(let i=0;i<6;i++)e.addShape(new p.Path.Rectangle({insert:false,rectangle:[separate.x+i*30,separate.y,20,20]}),'Rectangle');
+  const grid=new p.Point(0,40);
+  e.addShape(new p.Path.Rectangle({insert:false,rectangle:[grid.x,grid.y,60,60]}),'Rectangle');
+  for(let i=1;i<6;i++)e.addShape(new p.Path.Line({insert:false,from:[grid.x+i*10,grid.y],to:[grid.x+i*10,grid.y+60]}),'Line');
+  return [...Array.from({length:6},(_,i)=>[separate.x+i*30+10,separate.y+10]),...Array.from({length:6},(_,i)=>[grid.x+i*10+5,grid.y+30])];
+ });
+ for(let i=0;i<projectPoints.length;i++){
+  await page.waitForFunction(()=>{const p=(window as any).__paper,c=document.querySelector<HTMLCanvasElement>('#cad-canvas');return !!c&&Math.abs(p.view.viewSize.width-c.clientWidth)<1&&Math.abs(p.view.viewSize.height-c.clientHeight)<1;});
+  const view=await page.evaluate(([x,y])=>{const p=(window as any).__paper,point=p.view.projectToView(new p.Point(x,y));return {x:point.x,y:point.y};},projectPoints[i]);
+  const box=(await page.locator('#cad-canvas').boundingBox())!;
+  await page.mouse.click(box.x+view.x,box.y+view.y);
+  const state=await page.evaluate(()=>{const e=(window as any).__vectora;return {tool:e.tool,fills:e.objects.filter((item:any)=>item.data.regionFill).length};});
+  expect(state).toMatchObject({tool:'fill',fills:i+1});
+  if(i===0)await expect(page.locator('#colour-panel')).toBeHidden();
+ }
 });

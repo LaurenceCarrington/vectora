@@ -367,6 +367,7 @@ function update():void {
 for(const id of ['field-x','field-y','field-width','field-height','field-line-weight','arc-radius','text-property-size'])bindLength($<HTMLInputElement>('#'+id));
 window.addEventListener('vectora-general-change',()=>{objectCreation.refreshMeasurements();editor.refreshMeasurements();update();});
 editor.onChange=update;editor.onMessage=notify;
+editor.onFillComplete=()=>{if(!colour.hidden)setPanel(colour,false);};
 editor.onToolChange=tool=>{objectCreation.start(tool);if(objectCreation.active)setPanel(props,true);else if(tool==='fill')setPanel(colour,true);else updatePropertiesContent();};
 initializeThemeControls(()=>{colourSampler.cancel();inlineText.finish(false,false);editor.cancel();editor.refreshTheme();});
 update();

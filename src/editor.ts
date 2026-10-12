@@ -104,6 +104,7 @@ export class CADEditor {
   onChange:()=>void=()=>{};
   onToolChange:(tool:ToolName)=>void=()=>{};
   onDocumentChange:(snapshot?:DocumentSnapshot)=>void=()=>{};
+  onFillComplete:()=>void=()=>{};
   get hasPendingGesture():boolean {return !!this.offsets?.active||!!this.patterns?.active||!!this.interaction||!!this.polyline||!!this.threePointArc||this.nodes.dragging||this.dimensions.active;}
   onTextRequest:(point:paper.Point|null,target:Shape|null)=>void=()=>{};
   textEditing=false;
@@ -446,6 +447,7 @@ export class CADEditor {
     // Filling selects the result without changing the layer used by drawing tools.
     this.layerSelectionSignature=this.selectionSignature();
     this.commit(before);
+    this.onFillComplete();
   }
   private clearFillAt(point:paper.Point):void {
     const region=regionAt(this.objects,point);
@@ -476,7 +478,7 @@ export class CADEditor {
       // Keep the original outline intact; only its painted area changes.
       if(item.strokeColor){item.fillColor=null;delete item.data.fillPaint;}else item.remove();
     }
-    this.selection=this.selection.filter(item=>item.isInserted());this.commit(before);
+    this.selection=this.selection.filter(item=>item.isInserted());this.commit(before);this.onFillComplete();
   }
   setPolygonSides(sides:number):void {
     if(!Number.isInteger(sides)||sides<3||sides>64)throw new Error('Enter a whole number of sides from 3 to 64.');

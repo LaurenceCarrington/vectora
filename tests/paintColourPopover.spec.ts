@@ -7,6 +7,7 @@ async function open(page:Page,tab='Gradient'){
 test('Gradient swatches open independent internal pickers with colour, opacity and undo',async({page})=>{
  await open(page);
  await page.evaluate(()=>{const e=(window as any).__vectora,p=(window as any).__paper;e.addShape(new p.Path.Rectangle({insert:false,rectangle:[10,20,40,30]}),'Box');e.fillAt(new p.Point(25,35));});
+ await page.getByRole('button',{name:'Fill & appearance',exact:true}).click();
  const stop=page.getByRole('button',{name:'Choose stop 1 colour',exact:true});await stop.click();
  const picker=page.getByRole('dialog',{name:'Stop 1 colour',exact:true});await expect(picker).toBeVisible();
  await picker.getByRole('textbox',{name:'Hex colour',exact:true}).fill('#12AB34');await picker.getByRole('textbox',{name:'Hex colour',exact:true}).press('Enter');
@@ -36,6 +37,7 @@ test('Pattern foreground and background pickers respect transparency and stay on
 test('Picker drag commits once and both themes and the reference share the pop-out',async({page,context})=>{
  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));await open(page);
  await page.evaluate(()=>{const e=(window as any).__vectora,p=(window as any).__paper;e.addShape(new p.Path.Rectangle({insert:false,rectangle:[10,20,40,30]}),'Box');e.fillAt(new p.Point(25,35));});
+ await page.getByRole('button',{name:'Fill & appearance',exact:true}).click();
  const state=()=>page.evaluate(()=>(window as any).__vectora.selected.data.fillPaint.stops[0].colour);
  const before=await state();await page.getByRole('button',{name:'Choose stop 1 colour',exact:true}).click();const picker=page.getByRole('dialog',{name:'Stop 1 colour',exact:true});
  const plane=picker.locator('.colour-plane'),rect=(await plane.boundingBox())!;
