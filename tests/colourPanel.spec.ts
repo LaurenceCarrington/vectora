@@ -23,6 +23,14 @@ test('Picker controls fill opacity and leaves operation colours intact',async({p
  await page.evaluate(()=>{const e=(window as any).__vectora,p=(window as any).__paper;e.setActiveLayer('artwork');e.fillAt(new p.Point(25,35));});expect((await state(page)).fill).toBe('#22aa88');expect((await state(page)).opacity).toBe(.5);
 });
 
+test('Fill tool icon previews solid opacity, gradients and pattern styles',async({page})=>{
+ await ready(page);await open(page);const icon=page.locator('[data-fill-trigger] svg'),paintArea=icon.locator('[data-fill-paint]');
+ await expect(paintArea).toHaveAttribute('fill','#FF0000');
+ await page.getByRole('spinbutton',{name:'Opacity (%)',exact:true}).fill('40');await page.getByRole('spinbutton',{name:'Opacity (%)',exact:true}).press('Enter');await expect(paintArea).toHaveAttribute('fill-opacity','0.4');
+ await page.getByRole('tab',{name:'Gradient',exact:true}).click();await expect(icon.locator('linearGradient stop')).toHaveCount(2);await expect(paintArea).toHaveAttribute('fill',/^url\(#fill-tool-paint-/);
+ await page.getByRole('tab',{name:'Pattern',exact:true}).click();await page.locator('#appearance-pattern select').selectOption('dots');await expect(icon.locator('pattern circle')).toHaveCount(1);await expect(paintArea).toHaveAttribute('fill-opacity','1');
+});
+
 test('A colour-area drag commits once, keyboard controls work and invalid hex is harmless',async({page})=>{
  await ready(page);await shape(page);await open(page);await paint(page,'#8235DC');const before=await state(page);
  const plane=page.locator('#colour-panel .colour-plane'),r=(await plane.boundingBox())!;await page.mouse.move(r.x+r.width*.7,r.y+r.height*.2);await page.mouse.down();await page.mouse.move(r.x+r.width*.3,r.y+r.height*.6,{steps:12});await page.mouse.up();expect((await state(page)).stroke).not.toBe(before.stroke);

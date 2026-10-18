@@ -508,8 +508,7 @@ footer { margin-top: 32px; padding-top: 16px; border-top: 2px solid var(--color-
 @media (forced-colors: active) { .vectora-slider { appearance: auto; -webkit-appearance: auto; }.vectora-slider::-webkit-slider-thumb { appearance: auto; -webkit-appearance: auto; }.toggle-track { border: 2px solid ButtonText; background: Canvas; box-shadow: none; }.toggle-track::after { background: ButtonText; }.vectora-toggle:checked + .toggle-track { background: Highlight; }.vectora-toggle:checked + .toggle-track::after { background: HighlightText; }.vectora-toggle:hover:not(:disabled):checked + .toggle-track { background:Highlight; box-shadow:none; }.vectora-toggle:disabled + .toggle-track { background:Canvas; border-color:GrayText; box-shadow:none; }.vectora-toggle:disabled + .toggle-track::after { background:GrayText; } }
 
 /* Colour fill uses the shared appearance pop-out and field styles. */
-.fill-tools { position:relative; --fill-icon-colour:var(--fill-colour,#FF0000); }
-.fill-tools.is-no-fill { --fill-icon-colour:none; }
+.fill-tools { position:relative; }
 .fill-tools > .tool { position:relative; }
 
 /* Number fields: use the same neutral surfaces and even spacing as the menus. */

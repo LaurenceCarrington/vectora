@@ -5,6 +5,7 @@ import type {Paint} from './colourPanel';
 import {CanvasColourSampler} from './canvasColourSampler';
 import {captureArtwork} from './captureArtwork';
 import {AppearancePanel} from './appearancePanel';
+import {renderFillToolIcon} from './fillToolIcon';
 import {ObjectCreation} from './objectCreation';
 import {ObjectProperties} from './objectProperties';
 import {preciseGeometry} from './shapeProperties';
@@ -303,8 +304,7 @@ function update():void {
   $('[data-text-tool]').setAttribute('aria-pressed',String(editor.tool==='text'));
   $('[data-fill-trigger]').classList.toggle('selected',editor.tool==='fill');
   $('[data-fill-trigger]').setAttribute('aria-pressed',String(editor.tool==='fill'));
-  $('.fill-tools').style.setProperty('--fill-colour',editor.fillColor);
-  $('.fill-tools').classList.toggle('is-no-fill',editor.noFill);
+  renderFillToolIcon($('[data-fill-trigger]'),editor.fillPaint,editor.noFill);
   const colourItems=editor.selectedItems.filter(item=>item.data.role==='artwork'&&item.visible&&!item.locked&&item.layer.visible&&!item.layer.locked);
   const signature=colourItems.map(item=>`${item.data.uid}:${item.strokeColor?.toCSS(true)}:${item.fillColor?.toCSS(true)}:${item.opacity}:${JSON.stringify(item.data.fillPaint)}`).join('|');
   if(signature!==colourSelection){colourSelection=signature;const item=colourItems.at(-1),paint=item?.strokeColor??item?.fillColor;if(item?.data.fillPaint)colourPanel.setAppearance({...item.data.fillPaint,opacity:item.opacity});else if(!item)colourPanel.setAppearance(editor.fillPaint);else colourPanel.set({hex:paint?'#'+[paint.red,paint.green,paint.blue].map(n=>Math.round(n*255).toString(16).padStart(2,'0')).join(''):editor.fillColor,opacity:item?.opacity??editor.fillOpacity});}
