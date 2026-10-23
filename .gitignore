@@ -17,11 +17,17 @@ node_modules/
 /scripts/
 /reference/
 /docs/
+/audit-reports/
+/ICON_CATALOG.html
 /README.md
 /DESIGN.md
 /PRODUCT.md
+/src/**/README.md
 /public/fonts/sources/
 # Keep font licences, attribution and provenance alongside the runtime fonts.
+# Keep src, runtime public assets, package/lock files, TypeScript/Vite config,
+# index.html and .github/workflows available for reproducible builds/deployment.
+# Ignore rules do not untrack files already committed to Git.
 
 # Generated test output
 /test-results/
