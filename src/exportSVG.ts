@@ -1,16 +1,17 @@
+import {svgNumber,svgPathData} from './serialization/svgPathWriter';
 import {canExport} from './model/entityAccess';
 import {assertCircularIdentity} from './geometryCore/circularIdentity';
 import {paintDefinition,paintColour,type FillPaint} from './fillPaint';
 import paper from 'paper';
 import {documentPath} from './deletion';
-import {pathsOf} from './geometry';
+import {pathsOf,validateGeometryInput} from './geometry';
 import {dimensionLabel} from './dimensions';
 import {applyArtworkTheme} from './shapeStyles';
 import {BASE_ZOOM,MIN_DIMENSION_MM} from './units';
 import type {Shape} from './types';
 
 const NS='http://www.w3.org/2000/svg';
-const format=(value:number)=>String(Number(value.toFixed(8)));
+const format=svgNumber;
 
 /** Visible geometry in mm. Export ink defaults to black; Preview can retain the current theme ink. */
 export function exportSVG(objects:readonly Shape[],includeHidden=false,artworkInk='#000000'):string {
@@ -21,10 +22,13 @@ export function exportSVG(objects:readonly Shape[],includeHidden=false,artworkIn
   let bounds:paper.Rectangle|null=null;
   const items=objects.filter(item=>canExport(item,{kind:'svg',includeHidden}))
     .sort((a,b)=>a.layer.index-b.layer.index||a.index-b.index);
+  validateGeometryInput(items);
   for(const item of items){
     if(item.data.arc!==undefined)assertCircularIdentity(item);
-    const contours=pathsOf(item).filter(path=>path.segments.length>1).map(documentPath);
-    if(!contours.length)continue;
+    const sources=pathsOf(item).filter(path=>path.segments.length>1);
+    if(!sources.length)continue;
+    const data=svgPathData(sources);
+    const contours=sources.map(documentPath);
     const copy:Shape=contours.length===1?contours[0]:new paper.CompoundPath({insert:false,children:contours});
     const label=dimensionLabel(item);
     try{
@@ -51,8 +55,13 @@ export function exportSVG(objects:readonly Shape[],includeHidden=false,artworkIn
         groups.set(item.layer,group);svg.append(group);
       }
       for(const shape of [copy,...(label?[label]:[])]){
-        const node=shape.exportSVG({asString:false,precision:8,matchShapes:false}) as SVGElement;
-        if(shape===copy&&paintId)node.setAttribute('fill',`url(#${paintId})`);
+        const node=shape.exportSVG({asString:false,precision:16,matchShapes:false}) as SVGElement;
+        if(shape===copy){
+          const path=node.localName==='path'?node:node.querySelector('path');
+          if(!path)throw new Error('SVG export could not preserve the path structure.');
+          path.setAttribute('d',data);path.removeAttribute('transform');
+          if(paintId)path.setAttribute('fill',`url(#${paintId})`);
+        }
         node.removeAttribute('data-paper-data');group.append(node);
         const extent=shape.strokeBounds;
         bounds=bounds?bounds.unite(extent):extent.clone();

@@ -110,7 +110,11 @@ export class ExportDialog {
   }catch(e){error.textContent=e instanceof Error?e.message:String(e);error.hidden=false;this.releasePreview();this.get('.export-preview img').hidden=true;this.get('[data-preview-empty]').hidden=false;this.get('[data-export-size]').textContent='';}
  }
  private async download():Promise<void> {
-  if(this.busy)return;this.refresh();if(!this.prepared||!this.get<HTMLFormElement>('form').reportValidity())return;
+  if(this.busy)return;
+  // Revalidate SVG-backed output at submission: a cached preview must never
+  // authorize a stale download after geometry becomes unrepresentable.
+  if(this.format!=='dxf')this.cache.clear();
+  this.refresh();if(!this.prepared||!this.get<HTMLFormElement>('form').reportValidity())return;
   const name=this.get<HTMLInputElement>('#export-filename').value.trim().replace(/\.(svg|png|pdf|dxf)$/i,'').replace(/[<>:"/\\|?*\x00-\x1f]/g,'_').replace(/[. ]+$/,'');if(!name){this.get<HTMLInputElement>('#export-filename').focus();return;}
   const format=this.format,s={...this.settings[format]},snapshot=this.prepared,revision=++this.revision;this.busy=true;
   const controls=[...this.dialog.querySelectorAll<HTMLInputElement|HTMLButtonElement|HTMLSelectElement>('button,input,select')].filter(el=>!el.matches('[data-export-cancel],[aria-label="Close export"]'));controls.forEach(el=>el.disabled=true);this.get('[data-export-submit]').setAttribute('aria-busy','true');

@@ -7,7 +7,7 @@ export function layoutSVG(contents:string,options:{scale?:number;margin?:number;
  const scale=options.scale??1,margin=options.margin??0;
  if(!Number.isFinite(scale)||scale<=0||!Number.isFinite(margin)||margin<0)throw new Error('Enter a positive scale and a non-negative margin.');
  const w=options.page?.[0]??width*scale+margin*2,h=options.page?.[1]??height*scale+margin*2;
- if(w<=margin*2||h<=margin*2||width*scale>w-margin*2+1e-7||height*scale>h-margin*2+1e-7)throw new Error('The drawing does not fit this page. Reduce the scale or margins, or choose Fit drawing.');
+ if(!Number.isFinite(w)||!Number.isFinite(h)||w<=margin*2||h<=margin*2||width*scale>w-margin*2+1e-7||height*scale>h-margin*2+1e-7)throw new Error('The drawing does not fit this page. Reduce the scale or margins, or choose Fit drawing.');
  if(options.groups===false)svg.querySelectorAll('g[data-layer-name]').forEach(group=>{group.querySelector('title')?.remove();group.replaceWith(...group.childNodes);});
  const group=document.createElementNS(NS,'g');group.setAttribute('transform',`translate(${(w-width*scale)/2} ${(h-height*scale)/2}) scale(${scale}) translate(${-view[0]} ${-view[1]})`);
  group.append(...svg.childNodes);svg.append(group);svg.setAttribute('viewBox',`0 0 ${w} ${h}`);svg.setAttribute('width',`${w}mm`);svg.setAttribute('height',`${h}mm`);
