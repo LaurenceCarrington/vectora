@@ -1,92 +1,57 @@
-# Dependencies and generated builds (GitHub Actions builds dist for Pages)
-node_modules/
-/dist/
-/.vite/
-/.vite-temp/
-/.cache/
-/.npm/
-/.pnpm-store/
-/.yarn/cache/
-/.yarn/unplugged/
-/.yarn/install-state.gz
-*.tsbuildinfo
+# Track only the inputs required to build and publish Vectora.
+# Everything else stays local by default. Do not force-add development files.
+/*
 
-# Development-only files; not required to build, run or deploy the app
+# Application entry point and reproducible build configuration.
+!/.gitignore
+!/index.html
+!/package.json
+!/package-lock.json
+!/tsconfig.json
+
+# GitHub Pages deployment.
+!/.github/
+/.github/*
+!/.github/workflows/
+/.github/workflows/*
+!/.github/workflows/deploy.yml
+
+# Application source, workers, type declarations and shared styles.
+!/src/
+/src/**
+!/src/**/
+!/src/**/*.ts
+!/src/**/*.css
+
+# Runtime icons, fonts and single-line glyph data.
+!/public/
+/public/*
+!/public/favicon.png
+!/public/favicon.svg
+!/public/fonts/
+/public/fonts/*
+!/public/fonts/*.ttf
+!/public/fonts/*.otf
+!/public/fonts/*.json
+
+# Keep bundled-font licences, required acknowledgements and source attribution.
+!/public/fonts/*-OFL.txt
+!/public/fonts/OFL.txt
+!/public/fonts/Hershey-NOTICE.txt
+!/public/fonts/FreeFont-LICENSE.txt
+!/public/fonts/FreeFont-COPYING.txt
+!/public/fonts/FreeFont-AUTHORS.txt
+!/public/fonts/FreeFont-README.txt
+!/public/fonts/README.md
+
+# Explicit local-only test policy, including fixtures and test configuration.
 /tests/
 /playwright.config.ts
-/scripts/
-/reference/
-/docs/
-/audit-reports/
-/ICON_CATALOG.html
-/README.md
-/DESIGN.md
-/PRODUCT.md
-/src/**/README.md
-/public/fonts/sources/
-# Keep font licences, attribution and provenance alongside the runtime fonts.
-# Keep src, runtime public assets, package/lock files, TypeScript/Vite config,
-# index.html and .github/workflows available for reproducible builds/deployment.
-# Ignore rules do not untrack files already committed to Git.
 
-# Generated test output
-/test-results/
-/playwright-report/
-/blob-report/
-/coverage/
-/.nyc_output/
-/playwright/.cache/
-/test-results-*/
-
-# Local agent instructions and configuration
-AGENTS.md
-agents.md
-/.agents/
-/.codex/
-/.impeccable/
-/.worktrees/
-/docs/superpowers/
-/.claude/
-/.cursor/
-
-# Local environment files; keep shareable examples
-.env
-.env.*
-!.env.example
-!.env.*.example
-/.aws/
-/.ssh/
-/.npmrc
-/.netrc
-
-# Logs and temporary files
-*.log
-/tmp/
-/temp/
-*.tmp
-*.temp
-*.bak
-*.orig
-*.rej
-*.swp
-*.swo
-*~
-__pycache__/
-*.pyc
-/.pytest_cache/
-/.venv/
-/venv/
-
-# Local editor and operating-system files
-/.idea/
-/.vscode/
-*.code-workspace
-.DS_Store
-._*
-Thumbs.db
-Desktop.ini
-.AppleDouble/
-.LSOverride
-.Spotlight-V100/
-.Trashes/
-$RECYCLE.BIN/
+# Exclude local secrets and generated files even inside allowed source folders.
+**/.env
+**/.env.*
+**/.DS_Store
+**/*.log
+**/*.tsbuildinfo
+**/__pycache__/
