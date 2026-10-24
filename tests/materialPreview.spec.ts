@@ -191,10 +191,11 @@ test('view transitions are interruptible, settle to idle and honour reduced moti
   (window as any).__previewUnderTest=preview;await preview.open();
  });
  const dialog=page.getByRole('dialog',{name:'Material & process preview'}),canvas=dialog.locator('canvas');await expect(dialog.locator('[data-preview-status]')).toContainText('1 piece');
- // Invoke the same button listener synchronously to inspect the start of a genuine transition.
- const transitioning=await dialog.getByRole('button',{name:'Back view',exact:true}).evaluate((button:HTMLButtonElement)=>{button.click();const p=(window as any).__previewUnderTest;return {moving:!!p.cameraMotion,y:p.camera.position.clone().sub(p.controls.target).normalize().y};});
+ // Interrupt in the same browser task: transport/render delays must not let the
+ // 280ms transition finish before this test has delivered its interrupt.
+ const transitioning=await dialog.getByRole('button',{name:'Back view',exact:true}).evaluate((button:HTMLButtonElement)=>{button.click();const p=(window as any).__previewUnderTest;const started={moving:!!p.cameraMotion,y:p.camera.position.clone().sub(p.controls.target).normalize().y};p.renderer.domElement.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true}));return started;});
  expect(transitioning.moving).toBe(true);expect(transitioning.y).toBeGreaterThan(.99);
- await canvas.focus();await canvas.press('ArrowDown');await expect.poll(()=>page.evaluate(()=>(window as any).__previewUnderTest.cameraMotion)).toBeNull();await expect(dialog.locator('[data-preview-view]')).toHaveText('Orbit');
+ await expect.poll(()=>page.evaluate(()=>(window as any).__previewUnderTest.cameraMotion)).toBeNull();await expect(dialog.locator('[data-preview-view]')).toHaveText('Orbit');
  await expect.poll(()=>page.evaluate(()=>(window as any).__previewUnderTest.frame)).toBe(0);
  await page.emulateMedia({reducedMotion:'reduce'});await dialog.getByRole('button',{name:'Back view',exact:true}).click();
  const back=await page.evaluate(()=>{const p=(window as any).__previewUnderTest;return {moving:!!p.cameraMotion,y:p.camera.position.clone().sub(p.controls.target).normalize().y};});
@@ -263,4 +264,39 @@ test('the grid stays behind large thin pieces when zoomed in',async({page})=>{
   return {tops,gridPixels,near,far};
  });
  expect(result.tops).toBeGreaterThan(1000);expect(result.gridPixels).toBe(0);
+});
+
+
+test('preview damping settles at the same elapsed time on slow renderers and returns to idle',async({page})=>{
+ await seed(page);await page.evaluate(async()=>{
+  const {MaterialPreview}=await import('/src/materialPreview.ts'),{materialPreviewInput}=await import('/src/materialPreviewInput.ts');
+  const preview:any=new MaterialPreview(document.querySelector('[data-material-preview]')!,()=>materialPreviewInput((window as any).__vectora.objects));
+  (window as any).__previewUnderTest=preview;await preview.open();
+ });
+ const dialog=page.getByRole('dialog',{name:'Material & process preview'});await expect(dialog.locator('[data-preview-status]')).toContainText('1 piece');
+ await expect.poll(()=>page.evaluate(()=>(window as any).__previewUnderTest.frame)).toBe(0);
+ const results=await page.evaluate(()=>{
+  const p=(window as any).__previewUnderTest,raf=window.requestAnimationFrame,caf=window.cancelAnimationFrame,render=p.renderer.render;
+  const results=[];
+  try{
+   // Advance the real preview scheduler and OrbitControls with deterministic
+   // timestamps; GPU speed must not affect the number of simulated milliseconds.
+   p.renderer.render=()=>{};
+   for(const interval of [1000/60,125]){
+    p.view('top');caf(p.frame);p.frame=0;p.lastFrameTime=0;
+    const queue=new Map<number,FrameRequestCallback>();let id=0,now=performance.now(),frames=0;const started=now,target=p.controls.target.clone();
+    window.requestAnimationFrame=callback=>{queue.set(++id,callback);return id;};window.cancelAnimationFrame=key=>{queue.delete(key);};
+    // Residual pan after a pointer gesture, consumed by the real controls.update().
+    p.controls._panOffset.set(10,0,0);p.requestRender();
+    while(queue.size&&frames<200){const [key,callback]=queue.entries().next().value!;queue.delete(key);now+=interval;callback(now);frames++;}
+    results.push({interval,frames,elapsed:now-started,idle:p.frame===0&&queue.size===0,factor:p.controls.dampingFactor,pan:p.controls.target.distanceTo(target)});
+    window.requestAnimationFrame=raf;window.cancelAnimationFrame=caf;
+   }
+  }finally{window.requestAnimationFrame=raf;window.cancelAnimationFrame=caf;p.renderer.render=render;}
+  return results;
+ });
+ for(const result of results){expect(result.idle).toBe(true);expect(result.elapsed).toBeLessThan(2000);expect(result.factor).toBe(.1);expect(Math.abs(result.pan-10)).toBeLessThan(.01); /* OrbitControls stops below its 0.001 per-update movement threshold. */}
+ expect(results[1].frames).toBeLessThan(20);expect(Math.abs(results[1].elapsed-results[0].elapsed)).toBeLessThan(500);
+ await dialog.getByRole('button',{name:'Close preview',exact:true}).click();
+ expect(await page.evaluate(()=>{const p=(window as any).__previewUnderTest;return {frame:p.frame,lastFrameTime:p.lastFrameTime};})).toEqual({frame:0,lastFrameTime:0});
 });

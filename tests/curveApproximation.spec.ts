@@ -1,3 +1,4 @@
+import {forceCurveDepth} from './curveAdaptiveHelpers';
 import {test,expect,type Page} from './fixtures';
 const DEV='http://127.0.0.1:5174';
 type Point={x:number;y:number};
@@ -11,7 +12,7 @@ function cubicPoint(v:number[],t:number):Point {
 function polylineDistance(q:Point,points:Point[],closed=false):number {
  let d=Infinity;for(let i=1;i<points.length;i++)d=Math.min(d,segmentDistance(q,points[i-1],points[i]));if(closed&&points.length)d=Math.min(d,segmentDistance(q,points.at(-1)!,points[0]));return d;
 }
-for(const [scale,tolerance] of [[1000,.001],[1000,.05],[10000,.001],[10000,.05]])test(`GP01 S=${scale} tolerance=${tolerance} satisfies independent deviation checks or refuses`,async({page})=>{
+for(const [scale,tolerance] of [[1000,.001],[1000,.05],[10000,.001],[10000,.05]])test(`GP01 S=${scale} tolerance=${tolerance} succeeds and satisfies independent deviation checks`,async({page})=>{
  await page.goto(DEV);const r=await page.evaluate(async({scale,tolerance})=>{
   const p=(window as any).__paper,{flattenInDocument}=await import('/src/geometry.ts'),path=new p.Path({insert:false,segments:[new p.Segment([0,0],[0,0],[0,scale]),new p.Segment([scale,0],[0,scale],[0,0])]});
   const before=path.exportJSON({precision:16});let error:string|null=null,points:{x:number;y:number}[]=[];
@@ -21,10 +22,10 @@ for(const [scale,tolerance] of [[1000,.001],[1000,.05],[10000,.001],[10000,.05]]
  const v=[0,0,0,scale,scale,scale,scale,0],sampledMax=r.error?null:Math.max(...Array.from({length:2049},(_,i)=>polylineDistance(cubicPoint(v,i/2048),r.points))),witness=r.error?null:polylineDistance(cubicPoint(v,255/512),r.points);
  console.log('GP01 reproduction',JSON.stringify({scale,tolerance,error:r.error,points:r.points.length,sampledMax,witness,first:r.points.slice(0,3),last:r.points.slice(-3)}));expect(r.unchanged).toBe(true);
  if(r.error)expect(r.error).toMatch(/precision|tolerance/i);else{expect(r.points[0]).toEqual({x:0,y:0});expect(r.points.at(-1)).toEqual({x:scale,y:0});expect(sampledMax).toBeLessThanOrEqual(tolerance);}
- if(scale===1000&&tolerance===.05)expect(r.error).toBeNull();
+ expect(r.error).toBeNull();
 });
-for(const mode of ['standard','laser'] as const)test(`GP01 ${mode} export refuses unverified geometry without returning a partial file or changing state`,async({page})=>{
- await page.goto(DEV);const r=await page.evaluate(async mode=>{
+for(const mode of ['standard','laser'] as const)test(`Forced depth budget: ${mode} export refuses unverified geometry without returning a partial file or changing state`,async({page})=>{
+ await forceCurveDepth(page);await page.goto(DEV);const r=await page.evaluate(async mode=>{
   const e=(window as any).__vectora,p=(window as any).__paper,{exportDXF}=await import('/src/exportDXF.ts'),{encodeDocument}=await import('/src/documentFormat.ts');e.newDocument();e.setActiveLayer('cutline');e.addShape(new p.Path.Rectangle({insert:false,rectangle:[20,20,10,10]}),'Good');e.addShape(new p.Path({insert:false,segments:[new p.Segment([0,0],[0,0],[0,10000]),new p.Segment([10000,0],[0,10000],[0,0])]}),'GP01');
   const capture=()=>({session:JSON.stringify(e.captureSession()),native:encodeDocument(e),raw:e.objects.map((s:any)=>s.exportJSON({precision:16}))}),before=capture();let error:string|null=null,contents:string|null=null;
   try{contents=exportDXF(e.objects,false,mode,.05);}catch(e){error=(e as Error).message;}
@@ -45,9 +46,9 @@ const cases:CurveFixture[]=[
  {name:'nearly straight',v:[0,0,1,1e-10,2,-1e-10,3,0],tolerance:1e-9,outcome:'accept'},
  {name:'far-origin tiny curve',v:[0,0,0,.001,.001,.001,.001,0],matrix:[1,0,0,1,999990,999990],tolerance:1e-6,outcome:'either'},
  {name:'unresolved far-origin arithmetic',v:[0,0,0,.001,.001,.001,.001,0],matrix:[1,0,0,1,900000,900000],tolerance:1e-12,outcome:'refuse'},
- {name:'depth exhausted large curve',v:[0,0,0,500000,500000,500000,500000,0],tolerance:.001,outcome:'refuse'},
+ {name:'large curve now resolves beyond the former cap',v:[0,0,0,500000,500000,500000,500000,0],tolerance:.001,outcome:'accept'},
  {name:'finite chord with overhanging collinear handles',v:[0,0,100,0,-100,0,1,0],tolerance:.001,outcome:'either'},
- {name:'adversarial near-zero chord with huge handles',v:[0,0,500000,500000,-500000,-500000,.001,0],tolerance:.001,outcome:'refuse'},
+ {name:'resolved adversarial near-zero chord with huge handles',v:[0,0,500000,500000,-500000,-500000,.001,0],tolerance:.001,outcome:'accept'},
  {name:'zero chord must not silently erase a loop',v:[0,0,.001,.01,-.001,.01,0,0],tolerance:.05,outcome:'refuse'},
  {name:'resolved closed loop',v:[0,0,.001,.01,-.001,.01,0,0],tolerance:1e-5,closed:true,outcome:'accept'},
  {name:'tiny zero-chord loop is not a constant curve',v:[0,0,1e-14,1e-14,-1e-14,1e-14,0,0],tolerance:1e-13,outcome:'refuse'},
@@ -73,8 +74,8 @@ test('Constant duplicate anchors do not erase adjacent nonzero geometry',async({
  await page.goto(DEV);const r=await page.evaluate(async()=>{const p=(window as any).__paper,{flattenInDocument}=await import('/src/geometry.ts'),path=new p.Path({insert:false,segments:[[0,0],[0,0],[1,0],[1,0]]});try{return flattenInDocument(path,1e-9);}finally{path.remove();}});expect(r).toEqual([{closed:false,points:[{x:0,y:0},{x:1,y:0}]}]);
 });
 
-test('Every flattening consumer propagates precision refusal without changing committed state or returning partial data',async({page})=>{
- await page.goto(DEV);const r=await page.evaluate(async()=>{
+test('Forced depth budget: every flattening consumer propagates precision refusal without changing committed state or returning partial data',async({page})=>{
+ await forceCurveDepth(page);await page.goto(DEV);const r=await page.evaluate(async()=>{
   const e=(window as any).__vectora,p=(window as any).__paper,{flattenInDocument}=await import('/src/geometry.ts'),{exportContours,standardContours}=await import('/src/dxfGeometry.ts'),{createPathOffset,createStickerOutline,initializeClipper}=await import('/src/clipperService.ts'),{materialPreviewInput}=await import('/src/materialPreviewInput.ts'),{encodeDocument}=await import('/src/documentFormat.ts');await initializeClipper();e.newDocument();e.setActiveLayer('cutline');e.addShape(new p.Path.Rectangle({insert:false,rectangle:[20,20,10,10]}),'Good');e.addShape(new p.Path({insert:false,closed:true,segments:[new p.Segment([0,0],[0,0],[0,10000]),new p.Segment([10000,0],[0,10000],[0,0])]}),'Bad');const bad=e.selected;
   const capture=()=>({session:JSON.stringify(e.captureSession()),native:encodeDocument(e),raw:e.objects.map((s:any)=>s.exportJSON({precision:16}))}),before=capture(),rows=[];
   for(const [name,action] of [['flatten',()=>flattenInDocument(bad,.001)],['exportContours',()=>exportContours(bad,.05)],['standardContours',()=>standardContours(bad,.05)],['offset',()=>createPathOffset(bad,{distance:2,direction:'outward',corners:'round'})],['sticker',()=>createStickerOutline(bad,2)],['materialPreview',()=>materialPreviewInput(e.objects)]] as const){let returned=false,error:any=null;try{const value=await action();returned=true;if(value&&typeof (value as any).remove==='function')(value as any).remove();}catch(cause){const e=cause as any;error={message:e.message,code:e.code};}rows.push({name,returned,error,unchanged:JSON.stringify(capture())===JSON.stringify(before)});}
@@ -132,18 +133,18 @@ test('Laser DXF retains representable nonzero edges below the old length epsilon
  await page.goto(DEV);const text=await page.evaluate(async()=>{const p=(window as any).__paper,{exportDXF}=await import('/src/exportDXF.ts'),path=new p.Path({insert:false,segments:[[0,0],[1e-7,0]]});path.data.role='cutline';try{return exportDXF([path],false,'laser',.001);}finally{path.remove();}});expect(dxfSegments(text)).toEqual([[{x:0,y:-0},{x:1e-7,y:-0}]]);
 });
 
-async function seedBad(page:Page,scale=10000){await page.goto(DEV);return page.evaluate(async scale=>{const e=(window as any).__vectora,p=(window as any).__paper,{encodeDocument}=await import('/src/documentFormat.ts');e.newDocument();e.setActiveLayer('cutline');e.addShape(new p.Path.Rectangle({insert:false,rectangle:[20,20,10,10]}),'Good');const good=e.selected;e.addShape(new p.Path({insert:false,closed:true,segments:[new p.Segment([0,0],[0,0],[0,scale]),new p.Segment([scale,0],[0,scale],[0,0])]}),'GP01');e.select(good,true);return{session:JSON.stringify(e.captureSession()),native:encodeDocument(e)};},scale);}
-test('Export UI clears a previously valid preview and cannot download stale over-tolerance DXF',async({page})=>{
+async function seedBad(page:Page,scale=10000){await forceCurveDepth(page);await page.goto(DEV);return page.evaluate(async scale=>{const e=(window as any).__vectora,p=(window as any).__paper,{encodeDocument}=await import('/src/documentFormat.ts');e.newDocument();e.setActiveLayer('cutline');e.addShape(new p.Path.Rectangle({insert:false,rectangle:[20,20,10,10]}),'Good');const good=e.selected;e.addShape(new p.Path({insert:false,closed:true,segments:[new p.Segment([0,0],[0,0],[0,scale]),new p.Segment([scale,0],[0,scale],[0,0])]}),'GP01');e.select(good,true);return{session:JSON.stringify(e.captureSession()),native:encodeDocument(e)};},scale);}
+test('Forced depth budget: Export UI clears a previously valid preview and cannot download stale over-tolerance DXF',async({page})=>{
  const before=await seedBad(page,1000);let downloads=0;page.on('download',()=>downloads++);await page.getByRole('button',{name:'File',exact:true}).click();await page.getByRole('menuitem',{name:'Export…',exact:true}).click();const d=page.locator('#export-dialog');await d.getByRole('tab',{name:'DXF',exact:true}).click();await expect(d.locator('[data-export-submit]')).toBeEnabled();await d.getByText('Advanced',{exact:true}).click();await d.getByLabel('Curve tolerance (mm)').fill('.001');await d.getByLabel('Curve tolerance (mm)').dispatchEvent('change');await expect(d.locator('.export-error')).toContainText('tolerance');await expect(d.locator('[data-export-submit]')).toBeDisabled();await expect(d.locator('.export-preview img')).toBeHidden();await d.locator('form').evaluate((form:HTMLFormElement)=>form.requestSubmit());await page.waitForTimeout(150);expect(downloads).toBe(0);await d.getByRole('button',{name:'Cancel',exact:true}).click();
  const after=await page.evaluate(async()=>{const e=(window as any).__vectora,{encodeDocument}=await import('/src/documentFormat.ts');return{session:JSON.stringify(e.captureSession()),native:encodeDocument(e)};});expect(after).toEqual(before);
 });
-test('Offset UI discards earlier valid copies when a later source has unverified precision',async({page})=>{
+test('Forced depth budget: Offset UI discards earlier valid copies when a later source has unverified precision',async({page})=>{
  const before=await seedBad(page);await page.evaluate(()=>{(window as any).__vectora.offsets.open();});const d=page.locator('#offset-dialog');await expect(d.locator('.pattern-feedback')).toContainText('tolerance');await expect(d.locator('[data-offset-create]')).toBeDisabled();const state=await page.evaluate(async()=>{const e=(window as any).__vectora,{encodeDocument}=await import('/src/documentFormat.ts');return{session:JSON.stringify(e.captureSession()),native:encodeDocument(e),copies:e.offsets.copies.length};});expect(state).toEqual({...before,copies:0});await d.locator('[data-offset-cancel]').click();
 });
-test('Material preview reports unavailable precision without showing a partial material model',async({page})=>{
+test('Forced depth budget: Material preview reports unavailable precision without showing a partial material model',async({page})=>{
  const before=await seedBad(page);const model=await page.evaluate(async()=>{const {MaterialPreview}=await import('/src/materialPreview.ts'),{materialPreviewInput}=await import('/src/materialPreviewInput.ts'),e=(window as any).__vectora,preview:any=new MaterialPreview(document.querySelector('[data-material-preview]')!,()=>materialPreviewInput(e.objects));(window as any).__curvePreview=preview;await preview.open();return{model:preview.model,input:preview.input};});expect(model).toEqual({model:null,input:null});const d=page.getByRole('dialog',{name:'Material & process preview'});await expect(d.locator('[data-preview-message]')).toContainText('tolerance');await expect(d.locator('[data-preview-status]')).toHaveText('Preview unavailable');await d.getByRole('button',{name:'Close preview',exact:true}).click();const after=await page.evaluate(async()=>{const e=(window as any).__vectora,{encodeDocument}=await import('/src/documentFormat.ts');return{session:JSON.stringify(e.captureSession()),native:encodeDocument(e)};});expect(after).toEqual(before);
 });
-test('Refused approximation preserves the existing redo branch and native round-trip integrity',async({page})=>{
+test('Forced depth budget: refused approximation preserves the existing redo branch and native round-trip integrity',async({page})=>{
  await seedBad(page);const r=await page.evaluate(async()=>{const e=(window as any).__vectora,p=(window as any).__paper,{exportDXF}=await import('/src/exportDXF.ts'),{exportSVG}=await import('/src/exportSVG.ts'),{encodeDocument,decodeDocument}=await import('/src/documentFormat.ts');e.addShape(new p.Path.Rectangle({insert:false,rectangle:[50,50,5,5]}),'Redo witness');const redo=encodeDocument(e);e.undo();const before={session:JSON.stringify(e.captureSession()),native:encodeDocument(e),svg:exportSVG(e.objects)};let error=null;try{exportDXF(e.objects,false,'standard',.001);}catch(cause){error=(cause as Error).message;}const after={session:JSON.stringify(e.captureSession()),native:encodeDocument(e),svg:exportSVG(e.objects)},canRedo=e.canRedo;e.redo();const redone=encodeDocument(e);e.undo();const doc=await decodeDocument(before.native);e.loadDocument(doc.snapshot,doc.view);return{error,before,after,canRedo,redo,redone,reloaded:encodeDocument(e)};});expect(r.error).toContain('tolerance');expect(r.after).toEqual(r.before);expect(r.canRedo).toBe(true);expect(r.redone).toBe(r.redo);expect(r.reloaded).toBe(r.before.native);
 });
 

@@ -35,6 +35,7 @@ export class MaterialPreview {
     private revision = 0;
     private surfaceRevision = 0;
     private frame = 0;
+    private lastFrameTime = 0;
     private timer = 0;
     private opening = 0;
     private cameraMotion: { start: number; target: THREE.Vector3; from: THREE.Spherical; to: THREE.Spherical; label: string } | null = null;
@@ -345,10 +346,30 @@ export class MaterialPreview {
         spherical.phi = THREE.MathUtils.clamp(spherical.phi + (key === 'ArrowUp' ? -.12 : key === 'ArrowDown' ? .12 : 0), .002, Math.PI - .002);
         offset.setFromSpherical(spherical);
     } offset.setLength(THREE.MathUtils.clamp(offset.length(), this.controls.minDistance, this.controls.maxDistance)); this.camera.position.copy(this.controls.target).add(offset); this.controls.update(); this.requestRender(); }
-    private requestRender(): void { if (this.frame || !this.renderer || !this.dialog.open)
-        return; this.frame = requestAnimationFrame(() => { this.frame = 0; if (!this.renderer || !this.dialog.open)
-        return; const moving = this.cameraMotion ? this.stepCamera(performance.now()) : this.controls?.update(); this.clipping(); this.renderer.render(this.scene, this.camera); if (moving)
-        this.requestRender(); }); }
+    private requestRender(): void {
+        if (this.frame || !this.renderer || !this.dialog.open) return;
+        if (!this.lastFrameTime) this.lastFrameTime = performance.now();
+        this.frame = requestAnimationFrame(now => {
+            this.frame = 0;
+            if (!this.renderer || !this.dialog.open) return;
+            // OrbitControls damping is per update, not per second. Keep the
+            // same 60Hz feel while allowing slow/software WebGL frames to settle.
+            const elapsed = Math.min(250, Math.max(1, now - this.lastFrameTime));
+            this.lastFrameTime = now;
+            let moving: boolean | undefined;
+            if (this.cameraMotion) moving = this.stepCamera(now);
+            else if (this.controls) {
+                const factor = this.controls.dampingFactor;
+                this.controls.dampingFactor = 1 - Math.pow(1 - factor, elapsed / (1000 / 60));
+                try { moving = this.controls.update(); }
+                finally { this.controls.dampingFactor = factor; }
+            }
+            this.clipping();
+            this.renderer.render(this.scene, this.camera);
+            if (moving) this.requestRender();
+            if (!this.frame) this.lastFrameTime = 0;
+        });
+    }
     private message(text: string): void { const message = this.get('[data-preview-message]'); message.textContent = text; message.hidden = false; }
-    private close(): void { this.cameraMotion = null; ++this.opening; ++this.revision; ++this.surfaceRevision; clearTimeout(this.timer); cancelAnimationFrame(this.frame); this.frame = 0; this.observer.disconnect(); this.themeObserver.disconnect(); this.worker?.terminate(); this.worker = null; this.controls?.dispose(); this.controls = null; disposePreview(this.scene); this.environment?.dispose(); this.environment = null; this.renderer?.dispose(); this.renderer?.forceContextLoss(); this.renderer?.domElement.remove(); this.renderer = null; this.root = new THREE.Group(); this.grid = null; this.model = null; this.input = null; this.trigger.setAttribute('aria-expanded', 'false'); this.trigger.focus(); }
+    private close(): void { this.cameraMotion = null; ++this.opening; ++this.revision; ++this.surfaceRevision; clearTimeout(this.timer); cancelAnimationFrame(this.frame); this.frame = 0; this.lastFrameTime = 0; this.observer.disconnect(); this.themeObserver.disconnect(); this.worker?.terminate(); this.worker = null; this.controls?.dispose(); this.controls = null; disposePreview(this.scene); this.environment?.dispose(); this.environment = null; this.renderer?.dispose(); this.renderer?.forceContextLoss(); this.renderer?.domElement.remove(); this.renderer = null; this.root = new THREE.Group(); this.grid = null; this.model = null; this.input = null; this.trigger.setAttribute('aria-expanded', 'false'); this.trigger.focus(); }
 }

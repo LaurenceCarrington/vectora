@@ -2,11 +2,11 @@ import type {Vertex} from './types';
 
 type Range=readonly [number,number];
 export type CubicRanges=readonly Range[];
-export type ApproximationFailure='depth'|'points'|'work'|'precision'|'topology'|'serialization';
+export type ApproximationFailure='depth'|'points'|'work'|'nodes'|'memory'|'canceled'|'precision'|'topology'|'serialization';
 export class CurveApproximationError extends Error {
  readonly code='CURVE_APPROXIMATION_UNVERIFIED';
  constructor(readonly reason:ApproximationFailure,readonly toleranceMM?:number,readonly boundMM?:number){
-  const cause={depth:'subdivision depth limit',points:'too many curve points',work:'curve work budget exhausted',precision:'available arithmetic precision',topology:'a nonconstant contour would collapse',serialization:'DXF coordinate rounding would collapse an edge'}[reason];
+  const cause={depth:'subdivision depth limit',points:'too many curve points',work:'curve work budget exhausted',nodes:'curve node budget exhausted',memory:'temporary curve stack budget exhausted',canceled:'operation canceled',precision:'available arithmetic precision',topology:'a nonconstant contour would collapse',serialization:'DXF coordinate rounding would collapse an edge'}[reason];
   super(`This curve is too complex to verify within the requested${toleranceMM===undefined?'':` ${toleranceMM}`} mm tolerance (${cause}). The original drawing is unchanged.`);
   this.name='CurveApproximationError';
  }
@@ -15,7 +15,12 @@ const bits=new DataView(new ArrayBuffer(8));
 function down(n:number):number {
  if(!Number.isFinite(n))throw new CurveApproximationError('precision');
  if(n===0)return -Number.MIN_VALUE;
- bits.setFloat64(0,n);bits.setBigUint64(0,bits.getBigUint64(0)+(n<0?1n:-1n));return bits.getFloat64(0);
+ // Adjacent binary64 using two exact uint32 words avoids BigInt allocation
+ // in the hot interval path. Positive values decrement; negatives increment.
+ bits.setFloat64(0,n);let hi=bits.getUint32(0),lo=bits.getUint32(4);
+ if(n<0){lo=(lo+1)>>>0;if(lo===0)hi=(hi+1)>>>0;}
+ else{if(lo===0)hi=(hi-1)>>>0;lo=(lo-1)>>>0;}
+ bits.setUint32(0,hi);bits.setUint32(4,lo);return bits.getFloat64(0);
 }
 const up=(n:number)=>-down(-n);
 const exact=(n:number):Range=>{if(!Number.isFinite(n))throw new CurveApproximationError('precision');return[n,n];};

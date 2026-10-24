@@ -1,6 +1,7 @@
+import {FlattenBudget,flattenCertifiedCubic,type FlattenLimits} from './geometryCore/flattenCertified';
 import paper from 'paper';
 import {orientation,segmentsMeet,polygonContains,NumericBudget,BOOLEAN_VALIDATION_BUDGET} from './geometryCore/exactPredicates';
-import {CurveApproximationError,documentCubicRanges,subdivideCubicRanges,cubicChordErrorBound,hasNoncollinearPoints,type CubicRanges} from './curveApproximationSafety';
+import {CurveApproximationError,documentCubicRanges,hasNoncollinearPoints} from './curveApproximationSafety';
 import {polygonAreaRange,areaMagnitude,GEOMETRY_UNVERIFIED} from './geometrySafety';
 import type { Contour, Shape, Vertex } from './types';
 import { geometrySettings, NUMERIC_EPSILON_MM as EPS, validNumber } from './units';
@@ -32,10 +33,10 @@ const cubic=paper.Curve as unknown as {
   isFlatEnough(values:number[],tolerance:number):boolean;
   subdivide(values:number[],time:number):[number[],number[]];
 };
-export function flattenInDocument(source: Shape, toleranceMM=geometrySettings.flattenToleranceMM,maxPoints=MAX_FLATTEN_POINTS,maxWork=MAX_SOURCE_SEGMENTS+2*maxPoints): Contour[] {
+export function flattenInDocument(source: Shape, toleranceMM=geometrySettings.flattenToleranceMM,maxPoints=MAX_FLATTEN_POINTS,maxWork=MAX_SOURCE_SEGMENTS+2*maxPoints,limits:FlattenLimits={}): Contour[] {
   if(!Number.isFinite(toleranceMM)||toleranceMM<=0||!Number.isInteger(maxPoints)||maxPoints<0||maxPoints>MAX_DXF_POINTS||!Number.isInteger(maxWork)||maxWork<0||maxWork>MAX_SOURCE_SEGMENTS+2*MAX_DXF_POINTS)throw new Error('Invalid curve processing limits.');
   validateGeometryInput([source]);
-  let count=0,work=0;
+  let count=0;const budget=new FlattenBudget(toleranceMM,maxWork,limits);
   return pathsOf(source).map(path=>{
     const points:Vertex[]=[];let end:Vertex|undefined,nonconstant=false,hasLoop=false;
     const matrices:number[][]=[];for(let item:paper.Item|null=path;item;item=item.parent)matrices.push(item.matrix.values);
@@ -44,19 +45,7 @@ export function flattenInDocument(source: Shape, toleranceMM=geometrySettings.fl
       if(!validNumber(x)||!validNumber(y))throw new Error('Geometry exceeds the supported coordinate range (±1,000,000 mm).');
       const last=points.at(-1);if(last&&x===last.x&&y===last.y)return;
       if(count>=maxPoints)throw new CurveApproximationError('points',toleranceMM);
-      count++;points.push({x,y});
-    };
-    const visit=(values:number[],ranges:CubicRanges,depth:number,constant:boolean):void=>{
-      if(++work>maxWork)throw new CurveApproximationError('work',toleranceMM);
-      const zeroChord=values[0]===values[6]&&values[1]===values[7];
-      const bound=cubicChordErrorBound(ranges,values);
-      const legacySplit=depth<8&&!cubic.isStraight(values)&&!cubic.isFlatEnough(values,toleranceMM);
-      if(!legacySplit&&bound<=toleranceMM&&(!zeroChord||constant)){
-        append(values[0],values[1]);end={x:values[6],y:values[7]};return;
-      }
-      if(depth>=8)throw new CurveApproximationError('depth',toleranceMM,bound);
-      const halves=cubic.subdivide(values,.5),bounds=subdivideCubicRanges(ranges);
-      visit(halves[0],bounds[0],depth+1,constant);visit(halves[1],bounds[1],depth+1,constant);
+      count++;budget.stats.points=count;points.push({x,y});
     };
     const length=path.segments.length,curves=path.closed?length:Math.max(0,length-1);
     for(let i=0;i<curves;i++){
@@ -66,10 +55,12 @@ export function flattenInDocument(source: Shape, toleranceMM=geometrySettings.fl
       // Paper Point.isZero uses an epsilon; constancy here must be exact.
       const sameAnchor=a.point.x===b.point.x&&a.point.y===b.point.y;
       const constant=sameAnchor&&a.handleOut.x===0&&a.handleOut.y===0&&b.handleIn.x===0&&b.handleIn.y===0;nonconstant ||= !constant;hasLoop ||= !constant&&sameAnchor;
-      visit(values,documentCubicRanges(a.point,a.handleOut,b.point,b.handleIn,matrices,global,values),0,constant);
+      flattenCertifiedCubic(values,documentCubicRanges(a.point,a.handleOut,b.point,b.handleIn,matrices,global,values),constant,budget,{
+        split:v=>cubic.subdivide(v,.5),compatibilitySplit:(v,t)=>!cubic.isStraight(v)&&!cubic.isFlatEnough(v,t)
+      },leaf=>{append(leaf[0],leaf[1]);end={x:leaf[6],y:leaf[7]};});
     }
     if(!path.closed&&end)append(end.x,end.y);
-    if(path.closed&&points.length>1&&points[0].x===points.at(-1)!.x&&points[0].y===points.at(-1)!.y){points.pop();count--;}
+    if(path.closed&&points.length>1&&points[0].x===points.at(-1)!.x&&points[0].y===points.at(-1)!.y){points.pop();count--;budget.stats.points=count;}
     if((path.closed||hasLoop)&&nonconstant&&!hasNoncollinearPoints(points))throw new CurveApproximationError('topology',toleranceMM);
     return {closed:path.closed,points};
   });

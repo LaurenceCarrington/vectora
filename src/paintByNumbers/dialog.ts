@@ -4,6 +4,7 @@ import {validateRasterImage,MAX_RASTER_PIXELS} from '../rasterImage';
 import type {Shape} from '../types';
 import {pageFrame,layoutSheets} from './layout';
 import {loadLabelMetrics,prepareSheets,previewSheetSVG} from './paperSheets';
+import {smoothThumbnail} from './thumbnail';
 import {DEFAULT_PAGE,type PaintResult,type PageSettings,type RasterSource,type Smoothing} from './types';
 interface Host {insert:(sheets:{name:string;items:Shape[]}[])=>void;canInsert:boolean;returnFocus:()=>void}
 const field=(key:string,label:string,value:number,min:number,max:number,step:number,unit='')=>`<label class="generator-field">${label}<span class="number-shell"><input class="number-input" data-paint-setting="${key}" aria-label="${label}" type="number" value="${value}" min="${min}" max="${max}" step="${step}" required><span class="number-unit">${unit}</span></span></label>`;
@@ -56,7 +57,7 @@ export class PaintByNumbersDialog {
  }
  private thumbnail():void {
   if(!this.source)return;const source=this.source,canvas=document.createElement('canvas');canvas.width=source.width;canvas.height=source.height;canvas.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(source.data),source.width,source.height),0,0);
-  const thumbnail=this.get<HTMLCanvasElement>('[data-paint-thumbnail]'),ctx=thumbnail.getContext('2d')!,fit=Math.min(thumbnail.width/source.width,thumbnail.height/source.height),strength=this.value('smoothing');ctx.clearRect(0,0,thumbnail.width,thumbnail.height);ctx.save();ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';ctx.filter=strength==='heavy'?'blur(0.7px)':strength==='light'?'blur(0.3px)':'none';ctx.drawImage(canvas,(thumbnail.width-source.width*fit)/2,(thumbnail.height-source.height*fit)/2,source.width*fit,source.height*fit);ctx.restore();thumbnail.hidden=false;
+  const thumbnail=this.get<HTMLCanvasElement>('[data-paint-thumbnail]'),ctx=thumbnail.getContext('2d',{willReadFrequently:true})!,fit=Math.min(thumbnail.width/source.width,thumbnail.height/source.height),strength=this.value('smoothing') as Smoothing;ctx.clearRect(0,0,thumbnail.width,thumbnail.height);ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';ctx.drawImage(canvas,(thumbnail.width-source.width*fit)/2,(thumbnail.height-source.height*fit)/2,source.width*fit,source.height*fit);if(strength!=='off')ctx.putImageData(smoothThumbnail(ctx.getImageData(0,0,thumbnail.width,thumbnail.height),strength),0,0);thumbnail.hidden=false;
  }
  private queue():void {
   clearTimeout(this.timer);this.worker?.terminate();this.worker=null;this.result=null;this.readyKey='';this.get<HTMLButtonElement>('[data-paint-insert]').disabled=true;const generation=++this.generation;this.picker.close();if(!this.source)return;this.thumbnail();
