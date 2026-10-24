@@ -22,7 +22,7 @@ export class PathOffsets {
   d.addEventListener('input',()=>{this.dispose();this.createButton.disabled=true;this.feedback.classList.remove('is-error');this.feedback.textContent=this.active?'Updating preview…':'Select a closed path to offset.';this.hooks.changed();clearTimeout(this.timer);if(this.active)this.timer=setTimeout(()=>this.preview(),70);});
   d.querySelector('[data-offset-cancel]')!.addEventListener('click',()=>this.close());
   d.querySelector('[data-offset-pick]')!.addEventListener('click',()=>this.startPicking());
-  d.querySelector('form')!.onsubmit=event=>{event.preventDefault();clearTimeout(this.timer);if(!this.preview())return;const copies=this.copies;this.copies=[];this.cancel();this.hooks.apply(copies);this.editor.canvas.focus({preventScroll:true});};
+  d.querySelector('form')!.onsubmit=event=>{event.preventDefault();clearTimeout(this.timer);if(!this.preview())return;const copies=this.copies;this.copies=[];this.cancel();try{this.hooks.apply(copies);}catch(error){copies.forEach(({copy})=>copy.remove());this.editor.onMessage((error as Error).message,true);}this.editor.canvas.focus({preventScroll:true});};
   d.addEventListener('cancel',event=>{event.preventDefault();this.close();});
   d.addEventListener('keydown',event=>event.stopPropagation());
   d.addEventListener('click',event=>{if(event.target!==d)return;const r=d.getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)this.close();});

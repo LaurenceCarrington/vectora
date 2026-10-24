@@ -1,3 +1,4 @@
+import {assertCircularIdentity} from './geometryCore/circularIdentity';
 import {validateGridSettings} from './gridSettings';
 import {validateCanvasSize} from './canvasSize';
 import {validateFillPaint,type GradientColour} from './fillPaint';
@@ -8,7 +9,7 @@ import {documentPath} from './deletion';
 import {pathsOf} from './geometry';
 import {loadTextFont,TEXT_FONTS} from './text';
 import {DIMENSION_TOOLS} from './dimensions';
-import {MAX_COORDINATE_MM,MIN_ZOOM,MAX_ZOOM} from './units';
+import {MAX_COORDINATE_MM,MIN_ZOOM,MAX_ZOOM,BASE_ZOOM} from './units';
 import {LAYER_TYPES,validateLayerColour} from './documentLayers';
 import {MAX_SOURCE_CONTOURS,MAX_SOURCE_SEGMENTS,MAX_DOCUMENT_OBJECTS,MAX_DOCUMENT_LAYERS} from './processingLimits';
 
@@ -23,6 +24,21 @@ const bool=(value:unknown):boolean=>typeof value==='boolean'?value:fail();
 const tuple=(value:unknown,length:number):number[]=>Array.isArray(value)&&value.length===length?value.map(x=>number(x)):fail();
 const id=(value:unknown):string=>typeof value==='string'&&/^[\w-]{1,100}$/.test(value)?value:fail();
 const colour=(value:unknown):string|null=>value===null?null:typeof value==='string'&&/^(#[\da-f]{3,8}|rgba?\([\d.,\s]+\))$/i.test(value)?value:fail();
+
+/** Camera is optional navigation state, never a reason to discard good parts.
+ * Keep v1's representable view domain; invalid camera falls back without moving geometry. */
+export function safeDocumentView(value:unknown):{zoom:number;center:[number,number]} {
+ const v=value as {zoom?:unknown;center?:unknown}|null;
+ if(v&&typeof v.zoom==='number'&&Number.isFinite(v.zoom)&&v.zoom>=MIN_ZOOM&&v.zoom<=MAX_ZOOM&&Array.isArray(v.center)&&v.center.length===2&&v.center.every(n=>typeof n==='number'&&Number.isFinite(n)&&Math.abs(n)<=MAX_COORDINATE_MM))return {zoom:v.zoom,center:[v.center[0],v.center[1]]};
+ return {zoom:BASE_ZOOM,center:[100,70]};
+}
+/** These are affine coefficients, not world points. V1's existing six bounded
+ * fields remain a representation restriction: unsupported new edits must refuse.
+ * No editable metadata is silently rebased, baked or removed. */
+function affine(value:unknown):number[] {
+ let values:number[];try{values=tuple(value,6);}catch{throw new Error('This transform cannot be represented in a Vectora v1 document.');}
+ return values;
+}
 
 function savedColour(c:paper.Color|null):unknown {
  if(!c)return null;if(c.type!=='gradient')return c.toCSS(true);
@@ -47,7 +63,11 @@ export function encodeDocument(editor:CADEditor,pretty=true):string {
    const copy=documentPath(path);try{return {closed:copy.closed,segments:copy.segments.map(s=>[s.point.x,s.point.y,s.handleIn.x,s.handleIn.y,s.handleOut.x,s.handleOut.y])};}finally{copy.remove();}
   }),data:structuredClone(item.data),visible:item.visible,locked:item.locked,style:{fill:savedColour(item.fillColor),stroke:savedColour(item.strokeColor),width:item.strokeWidth,scaling:item.strokeScaling,fillRule:item.fillRule,cap:item.strokeCap,join:item.strokeJoin,miter:item.miterLimit,dash:item.dashArray,offset:item.dashOffset,opacity:item.opacity}};
  })}));
- return JSON.stringify({format:'vectora',version:1,units:'mm',rasterLayerInitialized:true,grid:editor.grid.config,canvasSize:editor.canvasSize,activeLayerId:editor.activeLayerId,layers,view:{zoom:paper.view.zoom,center:[paper.view.center.x,paper.view.center.y]}},null,pretty?2:undefined);
+ const file={format:'vectora',version:1,units:'mm',rasterLayerInitialized:true,grid:editor.grid.config,canvasSize:editor.canvasSize,activeLayerId:editor.activeLayerId,layers,view:safeDocumentView({zoom:paper.view.zoom,center:[paper.view.center.x,paper.view.center.y]})};
+ const contents=JSON.stringify(file,null,pretty?2:undefined);
+ // Formatting must not make an admitted compact drawing impossible to reopen.
+ // Whitespace is the only change; retain ordinary readable v1 files when they fit.
+ return pretty&&new Blob([contents]).size>MAX_DOCUMENT_BYTES?JSON.stringify(file):contents;
 }
 
 function metadata(value:unknown,role:ObjectRole,ids:Set<string>,fonts:Set<string>):JsonObject {
@@ -71,14 +91,14 @@ function metadata(value:unknown,role:ObjectRole,ids:Set<string>,fonts:Set<string
  if(data.text!==undefined){
   const t=record(data.text),fontId=string(t.fontId??'lato');if(!TEXT_FONTS.some(font=>font.id===fontId))fail();fonts.add(fontId);
   const content=string(t.content,500),sizeMM=number(t.sizeMM,1000);if(!content.trim()||sizeMM<0.1)fail();
-  out.text={content,fontId,sizeMM,transform:tuple(t.transform,6)};
+  out.text={content,fontId,sizeMM,transform:affine(t.transform)};
   if(!Array.isArray(t.glyphContours)||!Array.isArray(t.glyphLabels)||t.glyphContours.length>500||t.glyphContours.length!==t.glyphLabels.length)fail();
   out.text.glyphContours=t.glyphContours.map((v:unknown)=>{const n=number(v,2000);return Number.isInteger(n)&&n>=0?n:fail();});
   out.text.glyphLabels=t.glyphLabels.map((v:unknown)=>string(v,20));
  }
  if(data.dimension!==undefined){
   const d=record(data.dimension);if(!DIMENSION_TOOLS.includes(d.kind)||!Array.isArray(d.points)||d.points.length!==3)fail();
-  out.dimension={kind:d.kind,points:d.points.map((point:unknown)=>tuple(point,2)),transform:tuple(d.transform,6)};
+  out.dimension={kind:d.kind,points:d.points.map((point:unknown)=>tuple(point,2)),transform:affine(d.transform)};
   if(d.axis!==undefined){if(d.axis!=='x'&&d.axis!=='y')fail();out.dimension.axis=d.axis;}
   if(d.text!==undefined)out.dimension.text=string(d.text,5000);
  }
@@ -86,7 +106,7 @@ function metadata(value:unknown,role:ObjectRole,ids:Set<string>,fonts:Set<string
 }
 
 /** Validate and construct off-canvas paths before replacing any live document. */
-export async function decodeDocument(contents:string):Promise<{snapshot:DocumentSnapshot;view:{zoom:number;center:[number,number]}}> {
+export function prepareDocument(contents:string):{snapshot:DocumentSnapshot;view:{zoom:number;center:[number,number]};fontIds:string[]} {
  if(new Blob([contents]).size>MAX_DOCUMENT_BYTES)throw new Error('Choose a Vectora document smaller than 50 MB.');
  let file:JsonObject;try{file=record(JSON.parse(contents));}catch{throw new Error('Choose a valid .vectora document.');}
  if(file.format!=='vectora'||file.units!=='mm')fail();
@@ -108,7 +128,7 @@ export async function decodeDocument(contents:string):Promise<{snapshot:Document
    }
   }
  }
- const view=record(file.view),zoom=number(view.zoom,MAX_ZOOM);if(zoom<MIN_ZOOM)fail();const center=tuple(view.center,2) as [number,number];
+ const {zoom,center}=safeDocumentView(file.view);
  const canvasSize=validateCanvasSize(file.canvasSize),grid=validateGridSettings(file.grid);
  const layerIds=new Set<string>(),objectIds=new Set<string>(),fonts=new Set<string>();
  const states:any[]=[];let artwork='[]',cutlines='[]';
@@ -129,7 +149,7 @@ export async function decodeDocument(contents:string):Promise<{snapshot:Document
      contours.push(new paper.Path({insert:false,segments,closed:bool(c.closed)}));
     }
     shape=o.kind==='path'?contours[0]:new paper.CompoundPath({insert:false,children:contours});
-    shape.data=data;shape.visible=bool(o.visible);shape.locked=bool(o.locked);
+    shape.data=data;if(data.arc!==undefined)assertCircularIdentity(shape);shape.visible=bool(o.visible);shape.locked=bool(o.locked);
     shape.fillColor=restoredColour(style.fill);shape.strokeColor=restoredColour(style.stroke);
     if(data.role==='artwork'&&data.fillPaint&&data.fillPaint.kind!=='colour'){
      if(shape.fillColor?.type!=='gradient'||data.fillPaint.kind==='pattern'&&!shape.fillColor.highlight)fail();
@@ -148,12 +168,20 @@ export async function decodeDocument(contents:string):Promise<{snapshot:Document
  }
  // Earlier documents gain the empty default without replacing existing IDs or
  // geometry. The marker preserves deliberate layer removal in current files.
- if(!rasterLayerInitialized&&!states.some(layer=>layer.role==='raster')){
+ // A derived empty default must not make a previously valid maximum-layer file
+ // exceed its own admission budget. Every source layer is retained unchanged.
+ if(!rasterLayerInitialized&&states.length<MAX_DOCUMENT_LAYERS&&!states.some(layer=>layer.role==='raster')){
   let rasterId='raster',suffix=2;while(layerIds.has(rasterId))rasterId=`raster-${suffix++}`;
   layerIds.add(rasterId);states.push({id:rasterId,name:'Raster Engrave',role:'raster',visible:true,locked:false,deleted:false,objects:'[]'});
  }
  for(const role of ['artwork','cutline'])if(!layerIds.has(role))states.push({id:role,name:role==='artwork'?'Artwork':'Cut Path',role,visible:false,locked:false,deleted:true});
- await Promise.all([...fonts].map(loadTextFont));
  const activeLayerId=file.activeLayerId===undefined?'artwork':id(file.activeLayerId);
- return {snapshot:{grid,canvasSize,activeLayerId:layerIds.has(activeLayerId)?activeLayerId:'artwork',artwork,cutlines,layers:JSON.stringify(states),selected:null,selectedIds:[]},view:{zoom,center}};
+ return {fontIds:[...fonts],snapshot:{grid,canvasSize,activeLayerId:layerIds.has(activeLayerId)?activeLayerId:'artwork',artwork,cutlines,layers:JSON.stringify(states),selected:null,selectedIds:[]},view:{zoom,center}};
+}
+
+/** The same native v1 validation is available synchronously for recovery writes.
+ * Font resources are prepared separately before activating a decoded document. */
+export async function decodeDocument(contents:string):Promise<{snapshot:DocumentSnapshot;view:{zoom:number;center:[number,number]}}> {
+ const {fontIds,...document}=prepareDocument(contents);
+ await Promise.all(fontIds.map(loadTextFont));return document;
 }

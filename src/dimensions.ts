@@ -1,3 +1,4 @@
+import {canReferenceVisible} from './model/entityAccess';
 import {lengthLabel} from './measurementDisplay';
 import {artworkColor} from './shapeStyles';
 import paper from 'paper';
@@ -65,14 +66,17 @@ export function dimensionLabel(item:Shape):paper.PointText|null {
   text.rotate(layout.angle,layout.position);return text;
 }
 /** Pick true circles and circular arcs; ellipses do not have one radius. */
-export function circleAt(objects:readonly Shape[],point:paper.Point,tolerance:number):{center:paper.Point;radius:number}|null {
-  for(const owner of [...objects].reverse())if(owner.layer.visible&&!owner.data.dimension&&!owner.data.text){
-    if(owner.data.arc){const arc=owner.data.arc;const copy=documentPath(owner as paper.Path),near=copy.getNearestPoint(point);copy.remove();if(near&&near.getDistance(point)<=tolerance)return {center:new paper.Point(arc.cx,arc.cy),radius:arc.radius};}
-    for(const path of pathsOf(owner))if(path.closed&&path.segments.length>=4){
+export function circleReferenceAt(objects:readonly Shape[],point:paper.Point,tolerance:number):{owner:Shape;center:paper.Point;radius:number}|null {
+  for(const owner of [...objects].reverse())if(canReferenceVisible(owner)&&!owner.data.dimension&&!owner.data.text){
+    if(owner.data.arc){const arc=owner.data.arc;const copy=documentPath(owner as paper.Path),near=copy.getNearestPoint(point);copy.remove();if(near&&near.getDistance(point)<=tolerance)return {owner,center:new paper.Point(arc.cx,arc.cy),radius:arc.radius};}
+    for(const path of pathsOf(owner))if(canReferenceVisible(path)&&path.closed&&path.segments.length>=4){
       const copy=documentPath(path),center=copy.bounds.center,radius=copy.bounds.width/2;
       const circular=radius>MIN_DIMENSION_MM&&Math.abs(copy.bounds.height/2-radius)<radius*0.0005&&copy.curves.every(curve=>[0,0.25,0.5,0.75].every(t=>Math.abs(curve.getPointAtTime(t).getDistance(center)-radius)<radius*0.0005));
-      const near=circular?copy.getNearestPoint(point):null;copy.remove();if(near&&near.getDistance(point)<=tolerance)return {center,radius};
+      const near=circular?copy.getNearestPoint(point):null;copy.remove();if(near&&near.getDistance(point)<=tolerance)return {owner,center,radius};
     }
   }
   return null;
 }
+
+/** Stable geometry-only facade for existing callers. */
+export function circleAt(objects:readonly Shape[],point:paper.Point,tolerance:number):{center:paper.Point;radius:number}|null {const result=circleReferenceAt(objects,point,tolerance);return result?{center:result.center,radius:result.radius}:null;}

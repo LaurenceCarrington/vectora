@@ -24,11 +24,27 @@ test('Picker controls fill opacity and leaves operation colours intact',async({p
 });
 
 test('Fill tool icon previews solid opacity, gradients and pattern styles',async({page})=>{
- await ready(page);await open(page);const icon=page.locator('[data-fill-trigger] svg'),paintArea=icon.locator('[data-fill-paint]');
- await expect(paintArea).toHaveAttribute('fill','#FF0000');
- await page.getByRole('spinbutton',{name:'Opacity (%)',exact:true}).fill('40');await page.getByRole('spinbutton',{name:'Opacity (%)',exact:true}).press('Enter');await expect(paintArea).toHaveAttribute('fill-opacity','0.4');
- await page.getByRole('tab',{name:'Gradient',exact:true}).click();await expect(icon.locator('linearGradient stop')).toHaveCount(2);await expect(paintArea).toHaveAttribute('fill',/^url\(#fill-tool-paint-/);
- await page.getByRole('tab',{name:'Pattern',exact:true}).click();await page.locator('#appearance-pattern select').selectOption('dots');await expect(icon.locator('pattern circle')).toHaveCount(1);await expect(paintArea).toHaveAttribute('fill-opacity','1');
+ await ready(page);await open(page);
+ const icon=page.locator('[data-fill-trigger] svg'),painted=icon.locator('[data-fill-paint],[data-fill-drop]');
+ const both=async(fill:string,opacity:string)=>{await expect(painted).toHaveCount(2);for(const part of await painted.all()){await expect(part).toHaveAttribute('fill',fill);await expect(part).toHaveAttribute('fill-opacity',opacity);}};
+ const paintReference=async()=>{const id=await icon.locator('defs > *').getAttribute('id');expect(id).toMatch(/^fill-tool-paint-/);return `url(#${id})`;};
+ await both('#FF0000','1');
+ await page.getByRole('spinbutton',{name:'Opacity (%)',exact:true}).fill('40');await page.getByRole('spinbutton',{name:'Opacity (%)',exact:true}).press('Enter');await both('#FF0000','0.4');
+ await page.getByRole('tab',{name:'Gradient',exact:true}).click();
+ for(const type of ['linear','radial']){
+  await page.locator('#appearance-gradient select').selectOption(type);
+  const gradient=icon.locator(type==='linear'?'linearGradient':'radialGradient');await expect(gradient).toHaveCount(1);await both(await paintReference(),'1');
+  const stops=gradient.locator('stop');await expect(stops).toHaveCount(2);
+  for(const [index,colour,offset] of [[0,'#FF0000','0'],[1,'#0000FF','1']] as const){await expect(stops.nth(index)).toHaveAttribute('stop-color',colour);await expect(stops.nth(index)).toHaveAttribute('offset',offset);await expect(stops.nth(index)).toHaveAttribute('stop-opacity','1');}
+ }
+ await page.getByRole('tab',{name:'Pattern',exact:true}).click();
+ for(const type of ['stripes','crosshatch','dots','checkerboard']){
+  await page.locator('#appearance-pattern select').selectOption(type);await expect(icon.locator('pattern')).toHaveCount(1);await both(await paintReference(),'1');
+  const pattern=icon.locator('pattern');
+  if(type==='crosshatch')await expect(pattern.locator('path')).toHaveAttribute('stroke','#FF0000');
+  else if(type==='dots')await expect(pattern.locator('circle')).toHaveAttribute('fill','#FF0000');
+  else {const rects=pattern.locator('rect');await expect(rects).toHaveCount(type==='checkerboard'?2:1);for(const rect of await rects.all())await expect(rect).toHaveAttribute('fill','#FF0000');}
+ }
 });
 
 test('A colour-area drag commits once, keyboard controls work and invalid hex is harmless',async({page})=>{

@@ -1,3 +1,4 @@
+import {canReferenceVisible} from './model/entityAccess';
 import paper from 'paper';
 import {documentPath} from './deletion';
 import {pathsOf} from './geometry';
@@ -50,7 +51,7 @@ function localPaths(paths:paper.Path[],point:paper.Point):paper.Path[] {
 
 /** Trace bounded faces of the visible Bézier outline network, preserving curves. */
 export function regionAt(objects:readonly Shape[],point:paper.Point):Shape|null {
-  const sources=objects.filter(item=>item.visible&&item.layer.visible&&!item.data.dimension).flatMap(pathsOf).filter(path=>path.visible);
+  const sources=objects.filter(item=>canReferenceVisible(item)&&!item.data.dimension).flatMap(pathsOf).filter(canReferenceVisible);
   const paths:paper.Path[]=[];
   const faces:paper.Path[]=[];
   try {

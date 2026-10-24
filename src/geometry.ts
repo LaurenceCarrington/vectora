@@ -1,4 +1,7 @@
 import paper from 'paper';
+import {orientation,segmentsMeet,polygonContains,NumericBudget,BOOLEAN_VALIDATION_BUDGET} from './geometryCore/exactPredicates';
+import {CurveApproximationError,documentCubicRanges,subdivideCubicRanges,cubicChordErrorBound,hasNoncollinearPoints,type CubicRanges} from './curveApproximationSafety';
+import {polygonAreaRange,areaMagnitude,GEOMETRY_UNVERIFIED} from './geometrySafety';
 import type { Contour, Shape, Vertex } from './types';
 import { geometrySettings, NUMERIC_EPSILON_MM as EPS, validNumber } from './units';
 import {MAX_SOURCE_SEGMENTS,MAX_SOURCE_CONTOURS,MAX_FLATTEN_POINTS,MAX_DXF_POINTS} from './processingLimits';
@@ -29,77 +32,82 @@ const cubic=paper.Curve as unknown as {
   isFlatEnough(values:number[],tolerance:number):boolean;
   subdivide(values:number[],time:number):[number[],number[]];
 };
-export function flattenInDocument(source: Shape, toleranceMM=geometrySettings.flattenToleranceMM,maxPoints=MAX_FLATTEN_POINTS): Contour[] {
-  if(!Number.isFinite(toleranceMM)||toleranceMM<=0||!Number.isInteger(maxPoints)||maxPoints<0||maxPoints>MAX_DXF_POINTS)throw new Error('Invalid curve processing limits.');
+export function flattenInDocument(source: Shape, toleranceMM=geometrySettings.flattenToleranceMM,maxPoints=MAX_FLATTEN_POINTS,maxWork=MAX_SOURCE_SEGMENTS+2*maxPoints): Contour[] {
+  if(!Number.isFinite(toleranceMM)||toleranceMM<=0||!Number.isInteger(maxPoints)||maxPoints<0||maxPoints>MAX_DXF_POINTS||!Number.isInteger(maxWork)||maxWork<0||maxWork>MAX_SOURCE_SEGMENTS+2*MAX_DXF_POINTS)throw new Error('Invalid curve processing limits.');
   validateGeometryInput([source]);
-  let count=0;
+  let count=0,work=0;
   return pathsOf(source).map(path=>{
-    const points:Vertex[]=[];let end:Vertex|undefined;
+    const points:Vertex[]=[];let end:Vertex|undefined,nonconstant=false,hasLoop=false;
+    const matrices:number[][]=[];for(let item:paper.Item|null=path;item;item=item.parent)matrices.push(item.matrix.values);
+    const global=path.globalMatrix.values;
     const append=(x:number,y:number)=>{
       if(!validNumber(x)||!validNumber(y))throw new Error('Geometry exceeds the supported coordinate range (±1,000,000 mm).');
-      const last=points.at(-1);if(last&&Math.hypot(x-last.x,y-last.y)<=EPS)return;
-      if(count>=maxPoints)throw new Error('This geometry has too many curve points. Simplify the paths, increase the curve tolerance or process fewer objects.');
+      const last=points.at(-1);if(last&&x===last.x&&y===last.y)return;
+      if(count>=maxPoints)throw new CurveApproximationError('points',toleranceMM);
       count++;points.push({x,y});
     };
-    const visit=(values:number[],depth:number):void=>{
-      // Match Paper's 1/256 minimum parameter span, without its unbounded
-      // parts/Segment/Path allocations. The budget is enforced on every point.
-      if(depth<8&&!cubic.isStraight(values)&&!cubic.isFlatEnough(values,toleranceMM)){
-        const halves=cubic.subdivide(values,.5);visit(halves[0],depth+1);visit(halves[1],depth+1);
-      }else if(Math.hypot(values[6]-values[0],values[7]-values[1])>0){
-        append(values[0],values[1]);end={x:values[6],y:values[7]};
+    const visit=(values:number[],ranges:CubicRanges,depth:number,constant:boolean):void=>{
+      if(++work>maxWork)throw new CurveApproximationError('work',toleranceMM);
+      const zeroChord=values[0]===values[6]&&values[1]===values[7];
+      const bound=cubicChordErrorBound(ranges,values);
+      const legacySplit=depth<8&&!cubic.isStraight(values)&&!cubic.isFlatEnough(values,toleranceMM);
+      if(!legacySplit&&bound<=toleranceMM&&(!zeroChord||constant)){
+        append(values[0],values[1]);end={x:values[6],y:values[7]};return;
       }
+      if(depth>=8)throw new CurveApproximationError('depth',toleranceMM,bound);
+      const halves=cubic.subdivide(values,.5),bounds=subdivideCubicRanges(ranges);
+      visit(halves[0],bounds[0],depth+1,constant);visit(halves[1],bounds[1],depth+1,constant);
     };
     const length=path.segments.length,curves=path.closed?length:Math.max(0,length-1);
     for(let i=0;i<curves;i++){
       const a=path.segments[i],b=path.segments[(i+1)%length];
-      // Tolerance is in document mm, including all ancestor transforms.
       const p0=path.localToGlobal(a.point),p1=path.localToGlobal(a.point.add(a.handleOut)),p2=path.localToGlobal(b.point.add(b.handleIn)),p3=path.localToGlobal(b.point);
-      visit([p0.x,p0.y,p1.x,p1.y,p2.x,p2.y,p3.x,p3.y],0);
+      const values=[p0.x,p0.y,p1.x,p1.y,p2.x,p2.y,p3.x,p3.y];
+      // Paper Point.isZero uses an epsilon; constancy here must be exact.
+      const sameAnchor=a.point.x===b.point.x&&a.point.y===b.point.y;
+      const constant=sameAnchor&&a.handleOut.x===0&&a.handleOut.y===0&&b.handleIn.x===0&&b.handleIn.y===0;nonconstant ||= !constant;hasLoop ||= !constant&&sameAnchor;
+      visit(values,documentCubicRanges(a.point,a.handleOut,b.point,b.handleIn,matrices,global,values),0,constant);
     }
     if(!path.closed&&end)append(end.x,end.y);
-    if(path.closed&&points.length>1&&distance(points[0],points[points.length-1])<=EPS){points.pop();count--;}
+    if(path.closed&&points.length>1&&points[0].x===points.at(-1)!.x&&points[0].y===points.at(-1)!.y){points.pop();count--;}
+    if((path.closed||hasLoop)&&nonconstant&&!hasNoncollinearPoints(points))throw new CurveApproximationError('topology',toleranceMM);
     return {closed:path.closed,points};
   });
 }
 export function distance(a:Vertex,b:Vertex):number { return Math.hypot(a.x-b.x,a.y-b.y); }
-export function signedArea(p:Vertex[]):number { return p.reduce((a,v,i)=> {const w=p[(i+1)%p.length]; return a+v.x*w.y-w.x*v.y;},0)/2; }
-function cross(a:Vertex,b:Vertex,c:Vertex):number { return (b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x); }
-function onSegment(a:Vertex,b:Vertex,p:Vertex):boolean {
-  return Math.abs(cross(a,b,p))<=EPS && p.x>=Math.min(a.x,b.x)-EPS && p.x<=Math.max(a.x,b.x)+EPS && p.y>=Math.min(a.y,b.y)-EPS && p.y<=Math.max(a.y,b.y)+EPS;
-}
-function intersects(a:Vertex,b:Vertex,c:Vertex,d:Vertex):boolean {
-  const abC=cross(a,b,c),abD=cross(a,b,d),cdA=cross(c,d,a),cdB=cross(c,d,b);
-  return (abC*abD<0 && cdA*cdB<0) || onSegment(a,b,c)||onSegment(a,b,d)||onSegment(c,d,a)||onSegment(c,d,b);
-}
-export function contains(p:Vertex[], v:Vertex):boolean {
-  let inside=false;
-  for(let i=0,j=p.length-1;i<p.length;j=i++) {
-    const a=p[i],b=p[j];
-    if((a.y>v.y)!==(b.y>v.y) && v.x<(b.x-a.x)*(v.y-a.y)/(b.y-a.y)+a.x) inside=!inside;
-  }
-  return inside;
-}
+export function signedArea(p:Vertex[]):number { const area=polygonAreaRange(p);if(p.length>=3)areaMagnitude(area);return area.value; }
+export function contains(p:Vertex[],v:Vertex):boolean {return polygonContains([p],v);}
 export function exteriorContours(contours:Contour[]):Contour[] {
-  return contours.filter((c,i)=>!contours.some((other,j)=>i!==j && Math.abs(signedArea(other.points))>Math.abs(signedArea(c.points)) && contains(other.points,c.points[0])));
+  const areas=contours.map(c=>areaMagnitude(polygonAreaRange(c.points)));
+  return contours.filter((c,i)=>!contours.some((other,j)=>{
+    if(i===j||!contains(other.points,c.points[0]))return false;
+    if(areas[j][0]>areas[i][1])return true;
+    if(areas[j][1]<areas[i][0])return false;
+    throw new Error(GEOMETRY_UNVERIFIED);
+  }));
 }
 export function validateOutlineContours(contours:Contour[]):void {
   if(!contours.length) throw new Error('Select a closed shape first.');
+  const count=contours.reduce((n,c)=>n+c.points.length,0);if(count*(count-1)/2>1000000)throw new Error(BOOLEAN_VALIDATION_BUDGET);
+  const budget=new NumericBudget(4000000);
   for(const {points:p,closed} of contours) {
     if(!closed) throw new Error('Sticker outlines require closed paths.');
-    if(p.length<3 || Math.abs(signedArea(p))<EPS) throw new Error('The selected shape is degenerate or self-intersecting.');
+    if(p.length<3) throw new Error('The selected shape has too few vertices.');
+    // Area sign must be resolved in mm²; a length epsilon is not an area floor.
+    areaMagnitude(polygonAreaRange(p));
     if(p.length>12000) throw new Error('This shape has too many vertices for the MVP. Increase the curve tolerance.');
     for(let i=0;i<p.length;i++) {
-      const prev=p[(i+p.length-1)%p.length],next=p[(i+1)%p.length];
-      if(Math.abs(cross(prev,p[i],next))<=EPS && (prev.x-p[i].x)*(next.x-p[i].x)+(prev.y-p[i].y)*(next.y-p[i].y)>EPS) throw new Error('The selected path doubles back on itself.');
+      const prev=p[(i+p.length-1)%p.length],next=p[(i+1)%p.length],at=p[i];
+      if(at.x===next.x&&at.y===next.y)throw new Error('The selected path has a zero-length edge.');
+      if(orientation(prev,at,next,budget)===0&&(prev.x!==at.x?(prev.x>at.x)===(next.x>at.x):(prev.y>at.y)===(next.y>at.y))) throw new Error('The selected path doubles back on itself.');
       for(let j=i+1;j<p.length;j++) {
         if(j===i+1 || (i===0 && j===p.length-1)) continue;
-        if(intersects(p[i],next,p[j],p[(j+1)%p.length])) throw new Error('Self-intersecting paths cannot produce a sticker outline.');
+        if(segmentsMeet(p[i],next,p[j],p[(j+1)%p.length],budget)) throw new Error('Self-intersecting paths cannot produce a sticker outline.');
       }
     }
   }
   for(let i=0;i<contours.length;i++) for(let j=i+1;j<contours.length;j++) {
     const a=contours[i].points,b=contours[j].points;
-    for(let k=0;k<a.length;k++) for(let l=0;l<b.length;l++) if(intersects(a[k],a[(k+1)%a.length],b[l],b[(l+1)%b.length])) throw new Error('Contours must not cross or touch one another.');
+    for(let k=0;k<a.length;k++) for(let l=0;l<b.length;l++) if(segmentsMeet(a[k],a[(k+1)%a.length],b[l],b[(l+1)%b.length],budget)) throw new Error('Contours must not cross or touch one another.');
   }
 }

@@ -1,4 +1,5 @@
 import paper from 'paper';
+import {canEdit,canReferenceVisible} from './model/entityAccess';
 import { pathsOf } from './geometry';
 import { NUMERIC_EPSILON_MM as EPS } from './units';
 import type { Shape } from './types';
@@ -53,10 +54,10 @@ function dissect(target:paper.Path,boundaries:paper.Path[],point:paper.Point):{r
   return {removed,remaining};
 }
 export function createDeletePlan(objects:readonly Shape[],point:paper.Point,tolerance:number,mode:'dissect-delete'|'line-delete'):DeletePlan|null {
-  const entries=objects.filter(owner=>owner.layer.visible).map(owner=>({owner,paths:pathsOf(owner).map(documentPath)}));
+  const entries=objects.filter(canReferenceVisible).map(owner=>({owner,paths:pathsOf(owner).filter(canReferenceVisible).map(documentPath)}));
   try{
     for(const entry of [...entries].reverse()){
-      if(entry.owner.layer.locked)continue;
+      if(!canEdit(entry.owner))continue;
       const target=[...entry.paths].reverse().find(path=>{const location=path.getNearestLocation(point);return location&&location.point.getDistance(point)<=tolerance;});
       if(!target)continue;
       if(mode==='line-delete')return {owner:entry.owner,preview:entry.paths.map(path=>path.clone({insert:false}) as paper.Path),remaining:null};

@@ -1,3 +1,4 @@
+import {canEdit} from './model/entityAccess';
 import {LayerControls} from './layerControls';
 import type paper from 'paper';
 import type { CADEditor } from './editor';
@@ -51,7 +52,7 @@ export class LayersPanel {
       this.list.querySelector<HTMLButtonElement>(selector)?.focus({ preventScroll: true });
       this.status.textContent = `${layer.name} ${action === 'visibility' ? (layer.visible ? 'visible.' : 'hidden on canvas.') : action === 'lock' ? (layer.locked ? 'locked.' : 'unlocked.') : action === 'expand' ? (this.expanded.has(role) ? 'expanded.' : 'collapsed.') : 'active for new objects.'}`;
     });
-    const managed=(id:string)=>{const layer=editor.documentLayer(id);return layer?{id,name:layer.name,colour:layerColour(layer),custom:isCustomLayer(layer),locked:layer.locked}:undefined;};
+    const managed=(id:string)=>{const layer=editor.documentLayer(id);return layer?{id,name:layer.name,colour:layerColour(layer),custom:isCustomLayer(layer),locked:layer.locked,contentEditable:layer.children.every(canEdit)}:undefined;};
     this.controls=new LayerControls(panel,{
       active:()=>managed(editor.activeLayerId),layer:managed,
       add:role=>{editor.addDocumentLayer(role,true);this.render();},
@@ -65,7 +66,7 @@ export class LayersPanel {
       const item=this.editor.objects.find(item=>item.data.uid===button?.dataset.objectId);
       if(!button||button.disabled||!item||!event.dataTransfer){event.preventDefault();return;}
       const items=this.editor.selectedItems.includes(item)?this.editor.selectedItems:[item];
-      this.draggedObjects=items.map(item=>item.data.uid);
+      if(!items.every(canEdit)){event.preventDefault();return;}this.draggedObjects=items.map(item=>item.data.uid);
       this.list.classList.add('is-object-drag-active');
       event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('application/x-vectora-layer-objects',JSON.stringify(this.draggedObjects));
       this.list.querySelectorAll<HTMLElement>('.layer-object').forEach(row=>row.classList.toggle('is-object-dragging',this.draggedObjects.includes(row.dataset.objectId!)));
@@ -129,7 +130,7 @@ export class LayersPanel {
     const roles=layers.map(layerId);
     const key = JSON.stringify([this.active, [...this.expanded], roles.map(role => {
       const layer = this.editor.documentLayer(role)!;
-      return [role,layer.name,layerRole(layer),layer.visible, layer.locked, layer.children.length,this.expanded.has(role)?layer.children.map(item => [item.data.uid, item.data.name,!!item.data.regionFill,!!item.data.text,!!item.data.dimension]):null];
+      return [role,layer.name,layerRole(layer),layer.visible, layer.locked, layer.children.length,this.expanded.has(role)?layer.children.map(item => [item.data.uid, item.data.name,!!item.data.regionFill,!!item.data.text,!!item.data.dimension,item.visible,item.locked,canEdit(item)]):null];
     })]);
     if (key === this.lastRender){this.updateSelection();this.controls.refresh();return;}
     this.lastRender = key;
@@ -151,7 +152,7 @@ export class LayersPanel {
       if (!layer.children.length) objects.textContent = 'No objects in this layer.';
       if(expanded)for (const item of layer.children) {
         const button = document.createElement('button');button.type = 'button';button.className = 'layer-object';button.dataset.objectId = item.data.uid;
-        button.disabled = !layer.visible || layer.locked;button.draggable=!button.disabled;button.setAttribute('aria-pressed','false');this.objectButtons.set(item.data.uid,button);
+        button.disabled = !canEdit(item);button.draggable=!button.disabled;button.setAttribute('aria-pressed','false');this.objectButtons.set(item.data.uid,button);
         button.innerHTML = icon(['Circle', 'Rectangle', 'Ellipse', 'Polygon', 'Line', 'Polyline', 'Freehand', 'Arc'].includes(item.data.name) ? item.data.name.toLowerCase() : item.data.regionFill?'fill':item.data.text?'text':item.data.dimension?'dimension-aligned': 'path');
         const label=document.createElement('span');label.textContent=item.data.name||'Object';button.title=`${label.textContent} · Drag to another layer`;button.append(label);objects.append(button);
       }
@@ -175,7 +176,7 @@ export class LayersPanel {
   private canDropObjects(id:string):boolean {
     const layer=this.editor.documentLayer(id),items=this.editor.objects.filter(item=>this.draggedObjects.includes(item.data.uid));
     return !!layer&&layer.visible&&!layer.locked&&items.length===this.draggedObjects.length&&items.length>0
-      &&items.every(item=>item.layer.visible&&!item.layer.locked)
+      &&items.every(canEdit)
       &&items.some(item=>item.layer!==layer);
   }
   private clearDropTarget():void {this.list.querySelectorAll('.is-drop-target').forEach(entry=>entry.classList.remove('is-drop-target'));}

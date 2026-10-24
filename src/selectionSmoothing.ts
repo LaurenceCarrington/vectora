@@ -10,6 +10,7 @@ import type {DocumentSnapshot,Shape} from './types';
 export class SelectionSmoothing {
  readonly panel=document.createElement('div');
  private sources:{owner:Shape;data:Shape['data'];topology:string;paths:{target:paper.Path;base:paper.Path;original:paper.Segment[];fixed:boolean}[]}[]=[];
+ get pending():boolean {return !!this.before;}
  private before:DocumentSnapshot|null=null;
  private checkpoint:{owner:Shape;data:Shape['data'];paths:{target:paper.Path;segments:paper.Segment[]}[]}[]|null=null;
  private anchor={x:0,y:0};
@@ -61,7 +62,7 @@ export class SelectionSmoothing {
  }
  private update():void {
   if(this.panel.hidden||!this.eligible)return;
-  if(!this.before){this.before=this.editor.snapshot();this.checkpoint=this.sources.map(({owner,paths})=>({owner,data:structuredClone(owner.data),paths:paths.map(({target})=>({target,segments:target.segments.map(s=>s.clone())}))}));}
+  if(!this.before){this.before=this.editor.mutationSnapshot();this.checkpoint=this.sources.map(({owner,paths})=>({owner,data:structuredClone(owner.data),paths:paths.map(({target})=>({target,segments:target.segments.map(s=>s.clone())}))}));}
   this.updating=true;
   try{
    let protectedCount=0;
@@ -93,7 +94,7 @@ export class SelectionSmoothing {
    slider.style.setProperty('--range-progress',`${Number(slider.value)/Number(slider.max)*100}%`);
   }
  }
- private finish():void {const before=this.before;this.before=null;this.checkpoint=null;this.completed={strength:this.strength.value,detail:this.detail.value};if(before)this.hooks.commit(before);}
+ private finish():void {const before=this.before;this.before=null;this.checkpoint=null;const previous=this.completed;this.completed={strength:this.strength.value,detail:this.detail.value};if(before){try{this.hooks.commit(before);}catch(error){this.completed=previous;this.strength.value=previous.strength;this.detail.value=previous.detail;this.labels();this.editor.onMessage((error as Error).message,true);}}}
  private rollback():void {
   if(!this.before)return;
   // Restore only the unfinished adjustment, without rebuilding the document.

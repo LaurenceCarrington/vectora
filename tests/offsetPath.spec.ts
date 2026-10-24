@@ -59,7 +59,15 @@ test('Cancelling Select path keeps the previous selection',async({page})=>{
 });
 
 test('Context menu omits Offset path; tool search and responsive panel remain available',async({page})=>{
- await setup(page);const pt=await page.evaluate(()=>{const e=(window as any).__vectora,p=(window as any).__paper,r=e.canvas.getBoundingClientRect(),q=p.view.projectToView(e.selected.bounds.center);return {x:r.left+q.x,y:r.top+q.y};});await page.mouse.click(pt.x,pt.y,{button:'right'});const menu=page.getByRole('menu',{name:'Selection actions',exact:true});await expect(menu).toBeVisible();await expect(menu.getByRole('menuitem',{name:'Offset path',exact:true})).toHaveCount(0);await expect(menu.getByRole('menuitem',{name:'Copy',exact:true})).toBeFocused();await page.keyboard.press('ArrowDown');await expect(menu.getByRole('menuitem',{name:'Layer',exact:true})).toBeFocused();await page.keyboard.press('Escape');await expect(menu).toBeHidden();
+ await setup(page);const pt=await page.evaluate(()=>{const e=(window as any).__vectora,p=(window as any).__paper,r=e.canvas.getBoundingClientRect(),q=p.view.projectToView(e.selected.bounds.center);return {x:r.left+q.x,y:r.top+q.y};});await page.mouse.click(pt.x,pt.y,{button:'right'});const menu=page.getByRole('menu',{name:'Selection actions',exact:true});await expect(menu).toBeVisible();await expect(menu.getByRole('menuitem',{name:'Offset path',exact:true})).toHaveCount(0);await expect(menu.locator(':scope > button[role="menuitem"] > span')).toHaveText(['Copy','Paste','Smooth','Layer']);
+ await expect(menu.getByRole('menuitem',{name:'Paste',exact:true})).toBeDisabled();
+ await expect(menu.getByRole('menuitem',{name:'Smooth',exact:true})).toBeEnabled();
+ await expect(menu.getByRole('menuitem',{name:'Copy',exact:true})).toBeFocused();
+ for(const name of ['Smooth','Layer','Copy']){await page.keyboard.press('ArrowDown');await expect(menu.getByRole('menuitem',{name,exact:true})).toBeFocused();}
+ for(const name of ['Layer','Smooth','Copy']){await page.keyboard.press('ArrowUp');await expect(menu.getByRole('menuitem',{name,exact:true})).toBeFocused();}
+ await page.keyboard.press('End');await expect(menu.getByRole('menuitem',{name:'Layer',exact:true})).toBeFocused();
+ await page.keyboard.press('Home');await expect(menu.getByRole('menuitem',{name:'Copy',exact:true})).toBeFocused();
+ await page.keyboard.press('Escape');await expect(menu).toBeHidden();await expect(page.locator('#cad-canvas')).toBeFocused();
  await page.getByRole('button',{name:'Search tools',exact:true}).click();await page.getByRole('combobox',{name:'Search tools'}).fill('offset path');await page.keyboard.press('Enter');await expect(page.locator('#offset-dialog')).toBeVisible();
  for(const theme of ['dark','light']){await page.evaluate(t=>document.documentElement.dataset.theme=t,theme);for(const size of [{width:390,height:700},{width:900,height:350}]){await page.setViewportSize(size);await expect(page.getByRole('button',{name:'Create offset'})).toBeInViewport();const b=await page.locator('#offset-dialog').boundingBox();expect(b!.x).toBeGreaterThanOrEqual(0);expect(b!.y).toBeGreaterThanOrEqual(0);expect(b!.x+b!.width).toBeLessThanOrEqual(size.width);await page.screenshot({path:`test-results/offset-${theme}-${size.width}.png`});}}
 });
@@ -83,4 +91,22 @@ test('Offsets reject coordinate overflow and bevel acute corners with a single s
 test('Production Offset action and design-system specimen use matching accessible controls',async({page})=>{
  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));await page.goto('http://127.0.0.1:4173');await page.getByRole('button',{name:'Shapes',exact:true}).click();await page.locator('#primary-shapes-menu [data-shape="Rectangle"]').click();await page.mouse.move(400,250);await page.mouse.down();await page.mouse.move(550,400,{steps:3});await page.mouse.up();await open(page);await page.getByRole('button',{name:'Create offset'}).click();await expect(page.locator('.selection-count')).toHaveText('1 selected');await page.keyboard.press('Control+z');await expect(page.locator('.selection-count')).toHaveText('1 selected');
  await page.goto(DEV+'/reference/design-system.html');await page.locator('#floating-menu [data-offset-open]').click();await expect(page.getByRole('dialog',{name:'Offset path',exact:true})).toBeVisible();await expect(page.getByRole('dialog').getByLabel('Corners',{exact:true})).toBeVisible();await page.keyboard.press('Escape');expect(errors).toEqual([]);
+});
+
+for(const scenario of ['copied rectangle','uncopied line'] as const)test(`Context keyboard order respects enabled actions for ${scenario}`,async({page})=>{
+ await setup(page);
+ if(scenario==='uncopied line')await page.evaluate(()=>{const e=(window as any).__vectora,p=(window as any).__paper;e.newDocument();e.addShape(new p.Path.Line({insert:false,from:[20,20],to:[60,50]}),'Line');});
+ const point=await page.evaluate(()=>{const e=(window as any).__vectora,p=(window as any).__paper,r=e.canvas.getBoundingClientRect(),q=p.view.projectToView(e.selected.bounds.center);return {x:r.left+q.x,y:r.top+q.y};});
+ const menu=page.getByRole('menu',{name:'Selection actions',exact:true});
+ await page.mouse.click(point.x,point.y,{button:'right'});
+ if(scenario==='copied rectangle'){await menu.getByRole('menuitem',{name:'Copy',exact:true}).click();await page.mouse.click(point.x,point.y,{button:'right'});}
+ const before=await snapshot(page);
+ const paste=menu.getByRole('menuitem',{name:'Paste',exact:true}),smooth=menu.getByRole('menuitem',{name:'Smooth',exact:true});
+ if(scenario==='copied rectangle'){await expect(paste).toBeEnabled();await expect(smooth).toBeEnabled();}
+ else {await expect(paste).toBeDisabled();await expect(smooth).toBeDisabled();}
+ const order=scenario==='copied rectangle'?['Copy','Paste','Smooth','Layer']:['Copy','Layer'];
+ await expect(menu.getByRole('menuitem',{name:'Copy',exact:true})).toBeFocused();
+ for(const name of [...order.slice(1),order[0]]){await page.keyboard.press('ArrowDown');await expect(menu.getByRole('menuitem',{name,exact:true})).toBeFocused();}
+ for(const name of [...order.slice(1).reverse(),order[0]]){await page.keyboard.press('ArrowUp');await expect(menu.getByRole('menuitem',{name,exact:true})).toBeFocused();}
+ await page.keyboard.press('Escape');await expect(menu).toBeHidden();expect(await snapshot(page)).toBe(before);
 });

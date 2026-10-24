@@ -1,3 +1,5 @@
+import {canEdit} from './model/entityAccess';
+import {admitCopies} from './model/admission';
 import paper from 'paper';
 import type {CADEditor} from './editor';
 import type {Shape} from './types';
@@ -18,7 +20,7 @@ export class ObjectPatterns {
  private picker=document.createElement('div');
  picking=false;
  get active():boolean{return this.sources.length>0;}
- get available():boolean{return !this.active&&!this.editor.hasPendingGesture&&!this.editor.textEditing&&this.editor.selectedItems.length>0&&this.editor.selectedItems.every(s=>s.visible&&!s.locked&&s.layer.visible&&!s.layer.locked&&!s.layer.data.deleted);}
+ get available():boolean{return !this.active&&!this.editor.hasPendingGesture&&!this.editor.textEditing&&this.editor.selectedItems.length>0&&this.editor.selectedItems.every(s=>canEdit(s));}
  constructor(private editor:CADEditor,private hooks:Hooks){
   const d=this.dialog;d.id='pattern-dialog';d.className='pattern-dialog menu-surface';d.setAttribute('aria-label','Pattern');
   const field=(name:string,label:string,value:number,unit='',min=-1_000_000,max=1_000_000,step='any')=>`<label class="pattern-field" for="pattern-${name}">${label}<span class="number-shell"><input id="pattern-${name}" data-pattern-field="${name}" aria-label="${label}" class="number-input" type="number" min="${min}" max="${max}" step="${step}" value="${value}" required>${unit?`<span class="number-unit" aria-hidden="true">${unit}</span>`:''}</span></label>`;
@@ -59,21 +61,23 @@ export class ObjectPatterns {
   const value=(name:string)=>this.input(name).valueAsNumber;
   return this.kind==='rectangular'?{kind:this.kind,rows:value('rows'),columns:value('columns'),dx:this.input('dx').disabled?0:value('dx'),dy:this.input('dy').disabled?0:value('dy')}:{kind:this.kind,count:value('count'),angle:value('angle'),cx:value('cx'),cy:value('cy'),rotate:this.dialog.querySelector<HTMLInputElement>('[data-pattern-rotate]')!.checked};
  }
- private validSources():boolean{return this.sources.length>0&&this.sources.every(source=>this.editor.objects.includes(source)&&this.editor.selectedItems.includes(source)&&source.visible&&!source.locked&&source.layer.visible&&!source.layer.locked&&!source.layer.data.deleted)&&this.sources.length===this.editor.selectedItems.length;}
+ private validSources():boolean{return this.sources.length>0&&this.sources.every(source=>this.editor.objects.includes(source)&&this.editor.selectedItems.includes(source)&&canEdit(source))&&this.sources.length===this.editor.selectedItems.length;}
  private dispose():void{this.previewGroup?.remove();this.previewGroup=null;this.copies.forEach(({copy})=>copy.remove());this.copies=[];}
  private preview():boolean {
   this.dispose();const feedback=this.dialog.querySelector<HTMLElement>('.pattern-feedback')!,apply=this.dialog.querySelector<HTMLButtonElement>('[data-pattern-apply]')!;
   this.input('dx').disabled=this.kind!=='rectangular'||this.input('columns').valueAsNumber===1;this.input('dy').disabled=this.kind!=='rectangular'||this.input('rows').valueAsNumber===1;
   try{
    if(!this.validSources())throw new Error('Select visible, unlocked objects to repeat.');
-   const result=buildObjectPattern(this.sources,this.settings(),this.anchor);this.copies=result.copies;
+   const settings=this.settings(),instances=settings.kind==='rectangular'?settings.rows*settings.columns:settings.count;
+   if(Number.isSafeInteger(instances)&&instances>=2)admitCopies(this.editor,this.sources,instances-1);
+   const result=buildObjectPattern(this.sources,settings,this.anchor);this.copies=result.copies;
    feedback.textContent=`${result.instances} instances · ${result.instances*this.sources.length} objects · ${this.copies.length} new`;
    feedback.classList.remove('is-error');apply.disabled=false;this.hooks.changed();return true;
   }catch(error){feedback.textContent=(error as Error).message;feedback.classList.add('is-error');apply.disabled=true;this.hooks.changed();return false;}
  }
  private apply():void {
   if(!this.preview())return;
-  const copies=this.copies;this.copies=[];this.cancel();this.hooks.apply(copies);this.editor.canvas.focus({preventScroll:true});
+  const copies=this.copies;this.copies=[];this.cancel();try{this.hooks.apply(copies);}catch(error){copies.forEach(({copy})=>copy.remove());this.editor.onMessage((error as Error).message,true);}this.editor.canvas.focus({preventScroll:true});
  }
  /** Editor cancellation handles tool changes, Undo, document replacement and window blur. */
  cancel():void {this.dispose();this.sources=[];this.picking=false;this.pickPoint=null;this.picker.hidden=true;if(this.dialog.open)this.dialog.close();this.editor.canvas.classList.remove('pattern-picking');}

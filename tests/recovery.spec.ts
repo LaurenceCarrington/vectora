@@ -37,8 +37,8 @@ test('New document and Open retain other recovery tabs; undo is cached and saved
 
 test('Recovery survives a new tab and clearing browser site storage removes it',async({page,context})=>{
  await page.goto(DEV);await ready(page);await shape(page);
- await expect.poll(()=>page.evaluate(async()=>new Promise(resolve=>{const r=indexedDB.open('vectora-recovery');r.onsuccess=()=>{const db=r.result,q=db.transaction('documents').objectStore('documents').get('current');q.onsuccess=()=>{resolve(!!q.result);db.close();};};}))).toBe(true);
- await page.close();const next=await context.newPage();await next.goto(DEV);await ready(next);expect(await count(next)).toBe(1);
+ await expect.poll(()=>page.evaluate(async()=>{const __recoveryLoc=await (await import('/src/storage/recoverySession.ts')).recoveryLocation();const __recoveryKey=(slot:string)=>['recovery',__recoveryLoc.id,slot];return new Promise(resolve=>{const r=indexedDB.open('vectora-recovery');r.onsuccess=()=>{const db=r.result,q=db.transaction('documents').objectStore('documents').get(__recoveryKey('current'));q.onsuccess=()=>{resolve(!!q.result);db.close();};};});})).toBe(true);
+ await page.close();const next=await context.newPage();await next.goto(DEV+'?orphan=1');await next.getByRole('button',{name:'Restore workspace',exact:true}).click();await ready(next);expect(await count(next)).toBe(1);
  const session=await context.newCDPSession(next);await session.send('Storage.clearDataForOrigin',{origin:DEV,storageTypes:'indexeddb,local_storage'});await next.close();
  const fresh=await context.newPage();await fresh.goto(DEV);await ready(fresh);expect(await count(fresh)).toBe(0);
 });
@@ -51,11 +51,12 @@ test('Storage failures keep the live drawing usable and explain how to retain it
 test('Recovery retries an unchanged document after both storage writes fail',async({page})=>{
  await page.addInitScript(()=>{
   const setItem=Storage.prototype.setItem,put=IDBObjectStore.prototype.put;
-  Storage.prototype.setItem=function(key,value){if(key==='vectora.recovery.pending')throw new DOMException('Quota exceeded','QuotaExceededError');return setItem.call(this,key,value);};
+  Storage.prototype.setItem=function(key,value){if(key.startsWith('vectora.recovery.session.')&&key.endsWith('.pending'))throw new DOMException('Quota exceeded','QuotaExceededError');return setItem.call(this,key,value);};
   (window as any).recoveryAttempts=0;
   IDBObjectStore.prototype.put=function(value,key){
+   if(!value?.data)return put.call(this,value,key!);
    const contents=value.data.contents||value.data.tabs?.find((tab:any)=>tab.id===value.data.activeTabId)?.contents;
-   if(this.name==='documents'&&key==='current'&&JSON.parse(contents).layers.some((layer:any)=>layer.objects.length)&&++(window as any).recoveryAttempts===1)throw new DOMException('Temporary failure','UnknownError');
+   if(this.name==='documents'&&Array.isArray(key)&&key[0]==='recovery'&&key[2]==='current'&&JSON.parse(contents).layers.some((layer:any)=>layer.objects.length)&&++(window as any).recoveryAttempts===1)throw new DOMException('Temporary failure','UnknownError');
    return put.call(this,value,key!);
   };
  });

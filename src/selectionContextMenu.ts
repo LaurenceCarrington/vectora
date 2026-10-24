@@ -1,3 +1,4 @@
+import {canEdit} from './model/entityAccess';
 import paper from 'paper';
 import {layerId,layerRole,layerType} from './documentLayers';
 import type { CADEditor } from './editor';
@@ -87,7 +88,7 @@ export class SelectionContextMenu {
   }
   private renderLayers():void {
     const editor=this.editor,layers=editor.documentLayers;
-    const signature=JSON.stringify([editor.selectedItems.map(item=>[item.data.uid,layerId(item.layer)]),layers.map(layer=>[layerId(layer),layer.name,layerRole(layer),layer.data.colour,layer.visible,layer.locked])]);
+    const signature=JSON.stringify([editor.selectedItems.map(item=>[item.data.uid,layerId(item.layer),item.visible,item.locked,canEdit(item)]),layers.map(layer=>[layerId(layer),layer.name,layerRole(layer),layer.data.colour,layer.visible,layer.locked])]);
     if(signature===this.layerSignature)return;this.layerSignature=signature;this.layerMenu.replaceChildren();
     for(const layer of layers){
       const id=layerId(layer),current=editor.selectedItems.length>0&&editor.selectedItems.every(item=>item.layer===layer);

@@ -4,12 +4,13 @@ import {NewDocumentDialog} from './newDocumentDialog';
 import type {CanvasSize} from './canvasSize';
 import paper from 'paper';
 import {loadTextFont} from './text';
-import {DocumentRecovery,type RecoveryData} from './documentRecovery';
+import type {RecoveryData} from './documentRecovery';
+import {WorkspaceRecovery} from './storage/workspaceRecovery';
 import {DocumentName} from './documentName';
 import {DocumentTabs} from './documentTabs';
 import type {DocumentSnapshot,EditorSession} from './types';
 import type {CADEditor} from './editor';
-import {encodeDocument,decodeDocument,documentKey,MAX_DOCUMENT_BYTES} from './documentFormat';
+import {encodeDocument,decodeDocument,prepareDocument,safeDocumentView,documentKey,MAX_DOCUMENT_BYTES} from './documentFormat';
 import type {AlertKind} from './alerts';
 
 type FileHandle={name:string;getFile:()=>Promise<File>;createWritable:()=>Promise<{write:(data:string)=>Promise<void>;close:()=>Promise<void>;abort:()=>Promise<void>}>};
@@ -25,8 +26,9 @@ export class DocumentFiles {
  private busy=false;
  private renamed=false;
  private nameControl:DocumentName;
- private recovery:DocumentRecovery;
+ private recovery:WorkspaceRecovery;
  private recoveryReady=false;
+ private recoveryWritesAllowed=false;
  private restoring=false;
  private changedDuringStartup=false;
  private timer:number|undefined;
@@ -47,7 +49,7 @@ export class DocumentFiles {
   this.savedKey=documentKey(editor);
   this.tabs=[{id:this.activeId,filename:this.filename,handle:null,savedKey:this.savedKey,renamed:false,dirty:false,state:editor.captureSession(),contents:encodeDocument(editor)}];
   this.tabBar=new DocumentTabs(document.querySelector<HTMLElement>('[data-document-tabs]')!,{select:id=>this.selectTab(id),close:id=>this.closeTab(id),create:()=>this.newDocument()});
-  this.recovery=new DocumentRecovery(message=>this.notify(message,'warning'));
+  this.recovery=new WorkspaceRecovery(message=>this.notify(message,'warning'));
   this.nameControl=new DocumentName(document.querySelector<HTMLElement>('[data-document-name]')!,name=>{
    this.filename=name;this.handle=null;this.renamed=true;this.cache();
   },()=>{if(this.busy||!this.prepare())return false;this.editor.cancel();return true;},as=>{void this.save(as);});
@@ -67,12 +69,13 @@ export class DocumentFiles {
   document.addEventListener('pointerdown',resume,{capture:true});document.addEventListener('keydown',resume,{capture:true});editor.canvas.addEventListener('wheel',resume,{passive:true});
   const schedule=()=>this.scheduleBackup();
   window.addEventListener('vectora-general-change',()=>{if(this.timer!==undefined){clearTimeout(this.timer);this.timer=undefined;this.scheduleBackup();}});
-  editor.onDocumentChange=snapshot=>{if(this.restoring)return;resume();this.cachePending=true;this.captureCommitted(snapshot);this.renderTabs(this.renamed||this.committedKey!==this.savedKey||!!this.draft());this.scheduleBackup();};
+  editor.onDocumentChange=snapshot=>{if(this.restoring)return;if(!this.recoveryReady)this.changedDuringStartup=true;resume();this.cachePending=true;this.captureCommitted(snapshot);this.renderTabs(this.renamed||this.committedKey!==this.savedKey||!!this.draft());this.scheduleBackup();};
   editor.canvas.addEventListener('pointerup',schedule);editor.canvas.addEventListener('wheel',schedule,{passive:true});
   document.querySelector('#inline-text')!.addEventListener('input',schedule);
   document.addEventListener('click',schedule);document.addEventListener('keyup',schedule);
 
  }
+ recoverWorkspaces():Promise<void>{return this.recovery.browse();}
  get recoveryBytes():number{return this.recovery.usageBytes;}
  private scheduleBackup():void {if(this.timer===undefined)this.timer=window.setTimeout(()=>{this.timer=undefined;this.cache();},generalPreferences.value.backupInterval);}
  private captureCommitted(snapshot?:DocumentSnapshot):void {this.committedContents=encodeDocument(this.editor,false);this.committedKey=documentKey(this.editor,snapshot);this.committedViewKey=JSON.stringify([paper.view.zoom,paper.view.center.x,paper.view.center.y]);}
@@ -105,7 +108,7 @@ export class DocumentFiles {
   if(id===this.activeId)this.activate(this.tabs[index+1]??this.tabs[index-1]);
   this.tabs.splice(index,1);this.renderTabs();
  });}
- private createBlank(append=true,canvasSize:CanvasSize={kind:'infinite'},grid:GridConfig=this.editor.grid.config):void {
+ private createBlank(append=true,canvasSize:CanvasSize={kind:'infinite'},grid:GridConfig=this.editor.grid.config,authorizeRecovery=true):void {
   this.restoring=true;
   try{
    this.editor.newDocument(canvasSize,grid);this.handle=null;this.renamed=false;this.savedKey=documentKey(this.editor);
@@ -114,24 +117,23 @@ export class DocumentFiles {
    const tab:DocumentTab={id:this.activeId,filename:name,handle:null,savedKey:this.savedKey,renamed:false,dirty:false,state:this.editor.captureSession(),contents:encodeDocument(this.editor)};
    if(append)this.tabs.push(tab);else this.tabs=[tab];this.updateName();
   }finally{this.restoring=false;}
+  if(authorizeRecovery){this.recoveryWritesAllowed=true;this.recovery.resume();}
   this.editor.canvas.focus({preventScroll:true});
  }
  async restoreRecovery(draft:()=>RecoveryData['draft']):Promise<void>{
   this.draft=draft;
   const workspace=document.querySelector<HTMLElement>('#workspace')!;workspace.inert=true;let restored=false;
   try{
-   const data=await this.recovery.read();
-   if(data&&!this.changedDuringStartup){
-    const records=Array.isArray(data.tabs)&&data.tabs.length?data.tabs:[{id:this.activeId,contents:data.contents,filename:data.filename,dirty:data.dirty}];
-    const recovered:DocumentTab[]=[];
-    for(const record of records){
-     try{
-      if(!record||typeof record.id!=='string'||!/^[-\w]{1,100}$/.test(record.id)||recovered.some(tab=>tab.id===record.id)||typeof record.filename!=='string'||record.filename.length>1000||typeof record.contents!=='string'||typeof record.dirty!=='boolean')throw new Error('Invalid document tab.');
-      const loaded=await decodeDocument(record.contents);
-      recovered.push({...record,handle:null,savedKey:'',renamed:record.dirty,state:{...loaded,undo:[],redo:[],tool:'select'}});
-     }catch(error){this.notify(`Could not restore a document tab. ${error instanceof Error?error.message:String(error)}`,'warning');}
-    }
-    if(!recovered.length)throw new Error('No valid document tabs were found.');
+   const result=await this.recovery.readValidated(async prepared=>{
+    const fonts=new Set(prepared.tabs.flatMap(tab=>tab.loaded.fontIds));await Promise.all([...fonts].map(loadTextFont));
+   });
+   this.recoveryWritesAllowed=result.status==='valid'||result.status==='missing';
+   if(result.status==='unavailable')this.notify('Browser recovery could not be saved or fully checked because storage is unavailable. Automatic backup is paused until you explicitly create or open a document. Use Save to keep a copy of your drawing.','warning');
+   if(result.status==='invalid')this.notify('Could not restore the browser copies. Stored recovery data has been kept; automatic backup is paused until you explicitly create or open a document. Use Save to keep a separate copy.','warning');
+   if(result.status==='valid'&&result.issues.length)this.notify(`Some browser recovery data could not be restored. Usable documents were recovered and the original copies have been kept. ${result.issues.join(' ')}`,'warning');
+   if(result.status==='valid'&&!this.changedDuringStartup){
+    const data=result.prepared.data;
+    const recovered:DocumentTab[]=result.prepared.tabs.map(({tab,loaded})=>({...tab,handle:null,savedKey:'',renamed:tab.dirty,state:{snapshot:loaded.snapshot,view:loaded.view,undo:[],redo:[],tool:'select'}}));
     if(!this.changedDuringStartup){
      const active=recovered.find(tab=>tab.id===data.activeTabId)??recovered[0];
      this.activate(active);this.tabs=recovered;restored=true;this.renderTabs();this.restoring=true;
@@ -151,12 +153,12 @@ export class DocumentFiles {
      this.notify(this.tabs.length===1?'Restored your last document from this browser.':`Restored ${this.tabs.length} document tabs from this browser.`,'information');
     }
    }
-  }catch(error){this.notify(`Could not fully restore the browser copy. ${error instanceof Error?error.message:String(error)}`,'warning');}
+  }catch(error){this.recoveryWritesAllowed=false;this.notify(`Could not fully restore the browser copy. ${error instanceof Error?error.message:String(error)}`,'warning');}
   finally{
    this.restoring=false;
    if(!this.changedDuringStartup&&(!restored||generalPreferences.value.startup==='new')){
     const settings=await this.setup.open(undefined,restored?'new':'startup',this.editor.grid.config);
-    if(settings||!restored){if(restored)this.rememberActive();this.createBlank(restored,settings?.canvasSize??{kind:'infinite'},settings?.grid??this.editor.grid.config);this.cachePending=true;}
+    if(settings||!restored){if(restored)this.rememberActive();this.createBlank(restored,settings?.canvasSize??{kind:'infinite'},settings?.grid??this.editor.grid.config,false);this.cachePending=true;}
    }
    this.captureCommitted();
    this.recoveryReady=true;workspace.inert=false;if(this.changedDuringStartup||!restored||this.cachePending)this.cache();if(!restored)this.editor.canvas.focus({preventScroll:true});
@@ -165,7 +167,7 @@ export class DocumentFiles {
  private cache(snapshot?:DocumentSnapshot):void {
   if(this.timer!==undefined){clearTimeout(this.timer);this.timer=undefined;}
   if(this.restoring||this.unloadFlushed)return;
-  if(!this.recoveryReady){this.changedDuringStartup=true;return;}
+  if(!this.recoveryReady||!this.recoveryWritesAllowed)return;
   const pending=this.editor.hasPendingGesture;
   const draft=this.draft(),viewKey=JSON.stringify([this.activeId,this.filename,this.renamed,this.editor.activeLayerId,paper.view.zoom,paper.view.center.x,paper.view.center.y,draft,this.tabs.map(tab=>tab.id)]);
   if(!this.cachePending&&!this.recovery.needsRetry&&viewKey===this.cachedViewKey&&this.savedKey===this.cachedSavedKey)return;
@@ -173,7 +175,7 @@ export class DocumentFiles {
   const retained=pending||this.cachePending;
   let contents=retained?this.committedContents:encodeDocument(this.editor,false);
   // Reuse committed geometry; camera movement after a commit only changes the view.
-  if(retained&&!pending&&this.committedViewKey!==JSON.stringify([paper.view.zoom,paper.view.center.x,paper.view.center.y])){const data=JSON.parse(contents);data.view={zoom:paper.view.zoom,center:[paper.view.center.x,paper.view.center.y]};contents=JSON.stringify(data);}
+  if(retained&&!pending&&this.committedViewKey!==JSON.stringify([paper.view.zoom,paper.view.center.x,paper.view.center.y])){const data=JSON.parse(contents);data.view=safeDocumentView({zoom:paper.view.zoom,center:[paper.view.center.x,paper.view.center.y]});contents=JSON.stringify(data);}
   // Inline editing temporarily hides the original glyphs behind its textarea.
   if(draft?.sourceId){const data=JSON.parse(contents);for(const layer of data.layers)for(const object of layer.objects)if(object.data.uid===draft.sourceId)object.visible=true;contents=JSON.stringify(data);}
   const dirty=this.renamed||(retained?this.committedKey:documentKey(this.editor,snapshot))!==this.savedKey||!!draft;
@@ -204,8 +206,10 @@ export class DocumentFiles {
  save(as=false):Promise<void>{return this.run(async()=>{
   this.nameControl.commit();
   if(!this.prepare())return;
+  this.editor.cancel();
   const contents=encodeDocument(this.editor),key=documentKey(this.editor),api=window as FileWindow;
   if(new Blob([contents]).size>MAX_DOCUMENT_BYTES)throw new Error('This drawing is too large to save as a Vectora document (50 MB maximum).');
+  prepareDocument(contents);
   if(api.showSaveFilePicker){
    const handle=as||!this.handle?await api.showSaveFilePicker({suggestedName:this.filename,types:pickerTypes}):this.handle;
    const writable=await handle.createWritable();try{await writable.write(contents);await writable.close();}catch(error){try{await writable.abort();}catch{/* The stream may already be closed. */}throw error;}
@@ -239,7 +243,7 @@ export class DocumentFiles {
   this.restoring=true;
   try{
    this.editor.loadDocument(document.snapshot,document.view);this.handle=handle;this.filename=file.name;this.savedKey=documentKey(this.editor);this.renamed=false;this.activeId=crypto.randomUUID();
-   this.tabs.push({id:this.activeId,filename:this.filename,handle,savedKey:this.savedKey,renamed:false,dirty:false,state:this.editor.captureSession(),contents:encodeDocument(this.editor)});this.updateName();
+   this.tabs.push({id:this.activeId,filename:this.filename,handle,savedKey:this.savedKey,renamed:false,dirty:false,state:this.editor.captureSession(),contents:encodeDocument(this.editor)});this.updateName();this.recoveryWritesAllowed=true;this.recovery.resume();
   }finally{this.restoring=false;}
   this.notify(`Opened ${file.name}.`,'success');
  }

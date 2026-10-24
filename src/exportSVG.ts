@@ -1,3 +1,5 @@
+import {canExport} from './model/entityAccess';
+import {assertCircularIdentity} from './geometryCore/circularIdentity';
 import {paintDefinition,paintColour,type FillPaint} from './fillPaint';
 import paper from 'paper';
 import {documentPath} from './deletion';
@@ -17,9 +19,10 @@ export function exportSVG(objects:readonly Shape[],includeHidden=false,artworkIn
   let paintIndex=0;
   const groups=new Map<paper.Layer,SVGGElement>();
   let bounds:paper.Rectangle|null=null;
-  const items=objects.filter(item=>['artwork','cutline','engrave','raster'].includes(item.data.role)&&(includeHidden||(item.visible&&item.layer.visible))&&!item.layer.data.deleted&&item.opacity>0)
+  const items=objects.filter(item=>canExport(item,{kind:'svg',includeHidden}))
     .sort((a,b)=>a.layer.index-b.layer.index||a.index-b.index);
   for(const item of items){
+    if(item.data.arc!==undefined)assertCircularIdentity(item);
     const contours=pathsOf(item).filter(path=>path.segments.length>1).map(documentPath);
     if(!contours.length)continue;
     const copy:Shape=contours.length===1?contours[0]:new paper.CompoundPath({insert:false,children:contours});

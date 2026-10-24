@@ -2,7 +2,7 @@ import {ColourPopover} from './colourPopover';
 import {validateLayerName} from './documentLayers';
 import type {ObjectRole} from './types';
 
-export interface ManagedLayer {id:string;name:string;colour:string;custom:boolean;locked:boolean}
+export interface ManagedLayer {id:string;name:string;colour:string;custom:boolean;locked:boolean;contentEditable?:boolean}
 export interface LayerControlModel {
  active():ManagedLayer|undefined;
  layer(id:string):ManagedLayer|undefined;
@@ -47,7 +47,7 @@ export class LayerControls {
   panel.addEventListener('click',event=>{
    const button=(event.target as Element).closest<HTMLButtonElement>('[data-layer-colour]');if(!button||button.disabled)return;
    const id=button.closest<HTMLElement>('[data-layer-id]')!.dataset.layerId!;model.prepareColour();
-   const layer=model.layer(id),anchor=panel.querySelector<HTMLButtonElement>(`[data-layer-id="${id}"] [data-layer-colour]`);if(!layer||layer.locked||!layer.custom||!anchor)return;
+   const layer=model.layer(id),anchor=panel.querySelector<HTMLButtonElement>(`[data-layer-id="${id}"] [data-layer-colour]`);if(!layer||layer.locked||layer.contentEditable===false||!layer.custom||!anchor)return;
    this.picker.open(anchor,'Layer colour',{hex:layer.colour,opacity:1},false,(paint,commit)=>this.run(()=>model.colour(id,paint.hex,commit)));
   });
   document.addEventListener('pointerdown',event=>{if(!this.footer.contains(event.target as Node))this.toggleAdd(false);},true);
@@ -79,17 +79,17 @@ export class LayerControls {
   if(restoreFocus)this.panel.querySelector<HTMLButtonElement>(`[data-layer-id="${edit.id}"] .layer-select`)?.focus({preventScroll:true});
  }
  private confirmDelete():void {
-  const layer=this.model.active();if(!layer?.custom||layer.locked||this.dialog.open)return;
+  const layer=this.model.active();if(!layer?.custom||layer.locked||layer.contentEditable===false||this.dialog.open)return;
   this.endRename(true);this.picker.close();
   const count=this.panel.querySelector(`[data-layer-id="${layer.id}"] .layer-meta`)?.textContent??'its objects';
   this.dialog.querySelector('[data-layer-delete-message]')!.textContent=`Delete “${layer.name}” and ${count}? You can restore the layer and its contents with Undo.`;
   this.dialog.returnValue='';this.dialog.addEventListener('close',()=>{
-   if(this.dialog.returnValue==='delete'){const current=this.model.layer(layer.id);if(current?.custom&&!current.locked)this.run(()=>this.model.remove(layer.id));}
+   if(this.dialog.returnValue==='delete'){const current=this.model.layer(layer.id);if(current?.custom&&!current.locked&&current.contentEditable!==false)this.run(()=>this.model.remove(layer.id));}
    this.refresh();this.deleteButton.focus({preventScroll:true});if(this.deleteButton.disabled)this.addButton.focus({preventScroll:true});
   },{once:true});this.dialog.showModal();
  }
  refresh():void {
-  const active=this.model.active(),editable=!!active?.custom&&!active.locked;this.deleteButton.disabled=!editable;
+  const active=this.model.active(),editable=!!active?.custom&&!active.locked&&active.contentEditable!==false;this.deleteButton.disabled=!editable;
   for(const entry of this.panel.querySelectorAll<HTMLElement>('[data-layer-id]')){
    const layer=this.model.layer(entry.dataset.layerId!);if(!layer)continue;entry.style.setProperty('--layer-color',layer.colour);
    if(!layer.custom)continue;
@@ -97,7 +97,7 @@ export class LayerControls {
    if(!entry.querySelector('.layer-label')){const wrap=document.createElement('div');wrap.className='layer-label';select.before(wrap);wrap.append(select);select.querySelector('.layer-dot')?.remove();select.title=`Draw in ${layer.name} · Double-click or F2 to rename`;}
    let swatch=entry.querySelector<HTMLButtonElement>('[data-layer-colour]');
    if(!swatch){swatch=document.createElement('button');swatch.type='button';swatch.className='panel-icon layer-colour-button';swatch.dataset.layerColour='';swatch.setAttribute('aria-haspopup','dialog');swatch.setAttribute('aria-expanded','false');swatch.setAttribute('aria-controls',`${this.panel.id}-layer-colour-popover`);swatch.innerHTML='<span class="layer-dot" aria-hidden="true"></span>';entry.querySelector('.layer-label')!.before(swatch);}
-   swatch.disabled=layer.locked;swatch.setAttribute('aria-label',`Change ${layer.name} colour`);swatch.title=`Change ${layer.name} colour`;
+   swatch.disabled=layer.locked||layer.contentEditable===false;swatch.setAttribute('aria-label',`Change ${layer.name} colour`);swatch.title=`Change ${layer.name} colour`;
   }
   if(this.editing&&!this.editing.input.isConnected)this.editing=null;
  }

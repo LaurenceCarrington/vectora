@@ -1,4 +1,5 @@
 import paper from 'paper';
+import {normalizedArcAngle} from './geometryCore/circularIdentity';
 import {pathsOf} from './geometry';
 import {transformText} from './text';
 import {validNumber,MIN_DIMENSION_MM} from './units';
@@ -49,7 +50,7 @@ export function buildObjectPattern(sources:readonly Shape[],settings:PatternSett
     copy.data={...structuredClone(source.data),uid:crypto.randomUUID()};
     copy.transform(matrix);transformText(copy,matrix);
     if(rotation)copy.data.rotationDegrees=normalAngle((source.data.rotationDegrees??0)+rotation);
-    if(source.data.arc){const arc=source.data.arc,center=matrix.transform(new paper.Point(arc.cx,arc.cy));copy.data.arc={...arc,cx:center.x,cy:center.y,start:normalAngle(arc.start+rotation)};}
+    if(source.data.arc){const arc=source.data.arc,center=matrix.transform(new paper.Point(arc.cx,arc.cy));copy.data.arc={...arc,cx:center.x,cy:center.y,start:normalAngle(normalizedArcAngle(arc.start)+rotation)};}
     const b=copy.bounds;
     if(![b.left,b.top,b.right,b.bottom].every(validNumber)||!pathsOf(copy).every(path=>path.segments.every(s=>[s.point,s.point.add(s.handleIn),s.point.add(s.handleOut)].every(p=>{const q=path.localToGlobal(p);return validNumber(q.x)&&validNumber(q.y);}))))throw new Error('The pattern would exceed the document coordinate limits.');
    }

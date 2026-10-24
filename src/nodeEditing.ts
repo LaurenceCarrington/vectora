@@ -1,3 +1,4 @@
+import {canEdit,EntityAccessError} from './model/entityAccess';
 import paper from 'paper';
 import {canRoundCorner,editCorners,type CornerKind} from './cornerGeometry';
 import type { CADEditor } from './editor';
@@ -8,7 +9,7 @@ import { validNumber } from './units';
 
 type Target={uid:string;contour:number;index:number};
 type Part='point'|'handleIn'|'handleOut';
-type Hooks={changed:()=>void;commit:(before:DocumentSnapshot)=>void;restore:(before:DocumentSnapshot)=>void;snap:(point:paper.Point,spacing:number|null)=>paper.Point};
+type Hooks={changed:()=>void;commit:(before:DocumentSnapshot)=>void;restore:(before:DocumentSnapshot,publish?:boolean)=>void;snap:(point:paper.Point,spacing:number|null)=>paper.Point};
 export class NodeEditing {
   private active:Target|null=null;
   private corners:Target[]=[];
@@ -39,6 +40,8 @@ export class NodeEditing {
       }
     });
   }
+  captureSelection():{active:Target|null;corners:Target[]} {return structuredClone({active:this.active,corners:this.corners});}
+  restoreSelection(state:ReturnType<NodeEditing['captureSelection']>):void {const saved=structuredClone(state);this.active=saved.active;this.corners=saved.corners;}
   closeMenu():void{this.menu.hidden=true;}
   clear():void{this.closeCorner();this.active=null;this.corners=[];this.closeMenu();}
   private same(a:Target,b:Target):boolean{return a.uid===b.uid&&a.contour===b.contour&&a.index===b.index;}
@@ -71,17 +74,17 @@ export class NodeEditing {
     }catch(error){this.disposeCorners();feedback.textContent=(error as Error).message;feedback.classList.add('is-error');input.setAttribute('aria-invalid','true');apply.disabled=true;this.hooks.changed();return false;}
   }
   private applyCorners():void {
-    if(!this.previewCorners())return;const before=this.editor.snapshot();
+    if(!this.previewCorners())return;const before=this.editor.mutationSnapshot();
     // Precompute all local geometry before touching any contour, preserving parent transforms.
     const edits=this.cornerPlans.map(({owner,path,preview})=>({owner,path,segments:preview.segments.map(s=>{const p=path.globalToLocal(s.point);return new paper.Segment(p,path.globalToLocal(s.point.add(s.handleIn)).subtract(p),path.globalToLocal(s.point.add(s.handleOut)).subtract(p));})}));
     for(const {owner,path,segments} of edits){path.removeSegments();path.addSegments(segments);this.markEdited(owner);}
-    this.lastSizes[this.cornerKind]=this.cornerDialog.querySelector<HTMLInputElement>('[data-corner-size]')!.valueAsNumber;this.active=null;this.corners=[];this.closeCorner();this.hooks.commit(before);this.editor.canvas.focus({preventScroll:true});
+    this.lastSizes[this.cornerKind]=this.cornerDialog.querySelector<HTMLInputElement>('[data-corner-size]')!.valueAsNumber;this.active=null;this.corners=[];this.closeCorner();try{this.hooks.commit(before);}catch(error){this.editor.onMessage((error as Error).message,true);}this.editor.canvas.focus({preventScroll:true});
   }
-  private editable(owner:Shape):boolean{return owner.visible&&!owner.locked&&owner.layer.visible&&!owner.layer.locked&&!owner.data.text&&!owner.data.dimension;}
+  private editable(owner:Shape):boolean{return canEdit(owner)&&!owner.data.text&&!owner.data.dimension;}
   private resolve(target=this.active){
     const owner=this.editor.selectedItems.find(item=>item.data.uid===target?.uid);
     if(!owner||!target||!this.editable(owner))return null;
-    const path=pathsOf(owner)[target.contour],segment=path?.segments[target.index];return segment?{owner,path,segment}:null;
+    const path=pathsOf(owner)[target.contour],segment=path?.segments[target.index];return segment&&canEdit(path)?{owner,path,segment}:null;
   }
   private markEdited(owner:Shape):void{delete owner.data.arc;delete owner.data.sides;}
   private nodeHit(point:paper.Point):{target:Target;part:Part}|null{
@@ -110,7 +113,7 @@ export class NodeEditing {
     if(!hit){
       const curve=this.curveHit(point);
       if(!curve){
-        const text=this.editor.objects.find(item=>item.data.text&&item.bounds.contains(point)&&item.layer.visible&&!item.layer.locked);
+        const text=this.editor.objects.find(item=>item.data.text&&item.bounds.contains(point)&&canEdit(item));
         this.clear();this.editor.select(text??null);if(text)this.editor.onMessage('Convert text to paths before editing its nodes.');return;
       }
       if(!event.shiftKey||!this.editor.selectedItems.includes(curve.owner))this.editor.select(curve.owner,event.shiftKey);if(!event.shiftKey)this.corners=[];this.active=null;hit=this.nodeHit(point);
@@ -122,13 +125,14 @@ export class NodeEditing {
         this.corners=[hit.target];
       }
       this.active=hit.target;const resolved=this.resolve()!;
-      this.drag={id:event.pointerId,before:this.editor.snapshot(),part:hit.part,start:point,point:resolved.segment.point.clone(),handleIn:resolved.segment.handleIn.clone(),handleOut:resolved.segment.handleOut.clone(),spacing:this.editor.gridSnappingActive?this.editor.grid.spacingMM:null,moved:false};
+      this.drag={id:event.pointerId,before:this.editor.mutationSnapshot(),part:hit.part,start:point,point:resolved.segment.point.clone(),handleIn:resolved.segment.handleIn.clone(),handleOut:resolved.segment.handleOut.clone(),spacing:this.editor.gridSnappingActive?this.editor.grid.spacingMM:null,moved:false};
       this.editor.canvas.setPointerCapture(event.pointerId);
     }
     this.hooks.changed();
   }
   move(event:PointerEvent,point:paper.Point):void{
-    const drag=this.drag,resolved=this.resolve();if(!drag||!resolved||drag.id!==event.pointerId)return;
+    const drag=this.drag,resolved=this.resolve();if(!drag||drag.id!==event.pointerId)return;
+    if(!resolved){this.drag=null;if(this.editor.canvas.hasPointerCapture(drag.id))this.editor.canvas.releasePointerCapture(drag.id);if(drag.moved)this.hooks.restore(drag.before,false);this.editor.onMessage(new EntityAccessError().message,true);this.hooks.changed();return;}
     if(!drag.moved&&point.getDistance(drag.start)*paper.view.zoom<2)return;
     const {path,segment,owner}=resolved;
     if(drag.part==='point'){
@@ -146,9 +150,9 @@ export class NodeEditing {
     drag.moved=true;this.markEdited(owner);this.hooks.changed();
   }
   up(event:PointerEvent,point:paper.Point):void{
-    if(this.drag?.id!==event.pointerId)return;this.move(event,point);const drag=this.drag!;this.drag=null;
+    if(this.drag?.id!==event.pointerId)return;this.move(event,point);const drag=this.drag;if(!drag)return;this.drag=null;
     if(this.editor.canvas.hasPointerCapture(event.pointerId))this.editor.canvas.releasePointerCapture(event.pointerId);
-    if(drag.moved)this.hooks.commit(drag.before);else this.hooks.changed();
+    if(drag.moved){try{this.hooks.commit(drag.before);}catch(error){this.editor.onMessage((error as Error).message,true);}}else this.hooks.changed();
   }
   cancel():void{
     const drag=this.drag;this.drag=null;this.closeMenu();this.closeCorner();
@@ -157,7 +161,7 @@ export class NodeEditing {
   add(point:paper.Point):void{
     const hit=this.curveHit(point);if(!hit)return;
     if(hit.path.segments.some(segment=>hit.path.localToGlobal(segment.point).getDistance(point)<6/paper.view.zoom))return;
-    const before=this.editor.snapshot(),curve=hit.path.curves[hit.curve].divideAtTime(hit.time);if(!curve)return;
+    const before=this.editor.mutationSnapshot(),curve=hit.path.curves[hit.curve].divideAtTime(hit.time);if(!curve)return;
     this.editor.select(hit.owner);this.active={uid:hit.owner.data.uid,contour:hit.contour,index:curve.segment1.index};this.corners=[this.active];this.markEdited(hit.owner);this.hooks.commit(before);
   }
   context(point:paper.Point):void{
@@ -171,9 +175,9 @@ export class NodeEditing {
     this.menu.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
   }
   action(action:string):void{
-    const resolved=this.resolve();if(!resolved||this.drag)return;
+    const resolved=this.resolve();if(this.drag)return;if(!resolved){if(this.active)this.editor.onMessage(new EntityAccessError().message,true);return;}
     if(this.corners.length>1){this.editor.onMessage('Select a single node for this action.');return;}
-    const {owner,path,segment}=resolved,before=this.editor.snapshot();
+    const {owner,path,segment}=resolved,before=this.editor.mutationSnapshot();
     if(action==='delete'){
       path.removeSegment(segment.index);
       if(path.segments.length<2){path.remove();if(owner===path||!pathsOf(owner).length){owner.remove();this.editor.select(null);}}
@@ -197,7 +201,9 @@ export class NodeEditing {
     this.corners=this.active&&this.resolve()?[this.active]:[];this.markEdited(owner);this.hooks.commit(before);
   }
   draw():void{
-    this.corners=this.corners.filter(t=>!!this.resolve(t));
+    // Keep targets that still exist even when access is revoked. Dropping a
+    // protected corner here would let Apply silently edit the remaining subset.
+    this.corners=this.corners.filter(t=>{const owner=this.editor.selectedItems.find(item=>item.data.uid===t.uid);return !!owner&&!!pathsOf(owner)[t.contour]?.segments[t.index];});
     const color=getComputedStyle(document.documentElement).getPropertyValue('--color-selection').trim(),zoom=paper.view.zoom;
     const add=(item:paper.Item,control:string)=>{item.data={role:'overlay',control};this.editor.overlays.addChild(item);};
     const resolved=this.resolve();

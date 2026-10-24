@@ -1,3 +1,4 @@
+import {canReferenceVisible} from './model/entityAccess';
 import paper from 'paper';
 import { documentPath } from './deletion';
 import { pathsOf } from './geometry';
@@ -63,12 +64,12 @@ export function findObjectSnap(objects:readonly Shape[],cursor:paper.Point,toler
   try{
     const nearby:paper.Path[]=[];
     for(const owner of objects){
-      if(!owner.visible||!owner.layer.visible||excluded.includes(owner))continue;
+      if(!canReferenceVisible(owner)||excluded.includes(owner))continue;
       if(modes.centre&&owner instanceof paper.Path){
         if(owner.data.arc)add(new paper.Point(owner.data.arc.cx,owner.data.arc.cy),'centre');
         else if(owner.closed&&['Circle','Ellipse'].includes(owner.data.name))add(owner.bounds.center,'centre');
       }
-      for(const source of pathsOf(owner)){
+      for(const source of pathsOf(owner).filter(canReferenceVisible)){
         const copy=documentPath(source);copies.push(copy);
         if(modes.centre&&owner.data.name==='Arc'&&!owner.data.arc)add(arcCentre(copy),'centre');
         if(!copy.bounds.expand(tolerance*2).contains(cursor))continue;

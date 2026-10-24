@@ -1,4 +1,5 @@
 import paper from 'paper';
+import {assertCircularIdentity,normalizedArcAngle} from './geometryCore/circularIdentity';
 import { MAX_COORDINATE_MM, MIN_DIMENSION_MM, validNumber } from './units';
 
 /** An open circular arc through three distinct document-space points. */
@@ -19,7 +20,7 @@ export function createArc(from:paper.Point,through:paper.Point,to:paper.Point):p
 
 export interface ArcGeometry { cx:number; cy:number; radius:number; start:number; sweep:number }
 export function arcPoint(arc:ArcGeometry,angle:number):paper.Point {
-  return new paper.Point(arc.cx+arc.radius*Math.cos(angle*Math.PI/180),arc.cy+arc.radius*Math.sin(angle*Math.PI/180));
+  return new paper.Point(arc.cx+arc.radius*Math.cos(normalizedArcAngle(angle)*Math.PI/180),arc.cy+arc.radius*Math.sin(normalizedArcAngle(angle)*Math.PI/180));
 }
 export function createCircularArc(arc:ArcGeometry):paper.Path {
   if(![arc.cx,arc.cy,arc.radius,arc.start,arc.sweep].every(Number.isFinite)||arc.radius<MIN_DIMENSION_MM||arc.radius>MAX_COORDINATE_MM||Math.abs(arc.sweep)<1||Math.abs(arc.sweep)>359)throw new Error('Use a radius of at least 0.001 mm and a sweep from 1° to 359° in either direction.');
@@ -28,18 +29,30 @@ export function createCircularArc(arc:ArcGeometry):paper.Path {
   const spans=Math.ceil(Math.abs(arc.sweep)/90),step=arc.sweep/spans;
   const path=new paper.Path({insert:false,closed:false});
   for(let i=0;i<=spans;i++){
-    const angle=(arc.start+i*step)*Math.PI/180,k=4/3*Math.tan(step*Math.PI/720)*arc.radius;
+    const angle=normalizedArcAngle(normalizedArcAngle(arc.start)+i*step)*Math.PI/180,k=4/3*Math.tan(step*Math.PI/720)*arc.radius;
     const tangent=new paper.Point(-Math.sin(angle),Math.cos(angle)).multiply(k);
-    path.add(new paper.Segment(arcPoint(arc,arc.start+i*step),i?tangent.multiply(-1):undefined,i<spans?tangent:undefined));
+    path.add(new paper.Segment(arcPoint(arc,normalizedArcAngle(arc.start)+i*step),i?tangent.multiply(-1):undefined,i<spans?tangent:undefined));
   }
   if(![path.bounds.left,path.bounds.right,path.bounds.top,path.bounds.bottom].every(validNumber)){
     path.remove();throw new Error('The arc exceeds the document coordinate limits.');
   }
-  path.data.arc={...arc};return path;
+  path.data.arc={...arc};try{assertCircularIdentity(path);}catch(error){path.remove();throw error;}return path;
 }
 export function updateCircularArc(path:paper.Path,arc:ArcGeometry):void {
+  // Stored parameters are document-space even when the Path retains a matrix.
+  // Refuse stale input before rebuilding; prepare ALL local controls first.
+  assertCircularIdentity(path);
   const replacement=createCircularArc(arc);
-  path.removeSegments();path.addSegments(replacement.segments);path.data.arc={...arc};replacement.remove();
+  try{
+    const inverse=path.globalMatrix.inverted();
+    if(!inverse||!inverse.values.every(Number.isFinite))throw new Error('The arc transform cannot be edited safely.');
+    const [a,b,c,d]=inverse.values,vector=(p:paper.Point)=>new paper.Point(a*p.x+c*p.y,b*p.x+d*p.y);
+    const segments=replacement.segments.map(s=>new paper.Segment(inverse.transform(s.point),vector(s.handleIn),vector(s.handleOut)));
+    if(segments.some(s=>![s.point,s.handleIn,s.handleOut].every(p=>Number.isFinite(p.x)&&Number.isFinite(p.y))))throw new Error('The arc transform cannot be edited safely.');
+    const candidate=new paper.Path({insert:false,segments,closed:false,applyMatrix:false});
+    try{candidate.matrix=path.globalMatrix.clone();candidate.data.arc={...arc};assertCircularIdentity(candidate);}finally{candidate.remove();}
+    path.removeSegments();path.addSegments(segments);path.data.arc={...arc};
+  }finally{replacement.remove();}
 }
 /** Angle magnets are independent of the document grid: circular geometry stays circular. */
 export function snapArcAngle(angle:number,shift=false):number {

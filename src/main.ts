@@ -1,3 +1,4 @@
+import {canEdit} from './model/entityAccess';
 import {generalPreferences,UNIT_NAMES} from './generalPreferences';
 import {bindLength,setLength,readLength} from './measurementDisplay';
 import {ColourPopover} from './colourPopover';
@@ -82,7 +83,7 @@ async function updateTextStyle():Promise<void> {
   textFontSelect.disabled=true;textSize.disabled=true;$<HTMLButtonElement>('#edit-text').disabled=true;
   try{await loadTextFont(fontId);const current=editor.selected;if(request!==textStyleRequest||editor.textEditing||current!==selected)return;editor.saveText(current.data.text.content,size,null,uid,fontId);}
   catch(error){notify((error as Error).message,true);update();}
-  finally{if(request===textStyleRequest){textFontSelect.disabled=false;textSize.disabled=false;$<HTMLButtonElement>('#edit-text').disabled=false;}}
+  finally{if(request===textStyleRequest){textFontSelect.disabled=!editor.canFlipSelection;textSize.disabled=!editor.canFlipSelection;$<HTMLButtonElement>('#edit-text').disabled=!editor.canFlipSelection;}}
 }
 textFontSelect.addEventListener('change',()=>{void updateTextStyle();});
 textSize.addEventListener('change',()=>{void updateTextStyle();});
@@ -226,6 +227,7 @@ for(const button of document.querySelectorAll<HTMLButtonElement>('button')) {
   if(button.dataset.fileAction){const action=button.dataset.fileAction;
     if(action==='New document'){button.tabIndex=0;button.onclick=()=>{closeMenus();void documentFiles.newDocument();};}
     else if(action==='Canvas size'){button.tabIndex=0;button.onclick=()=>{closeMenus();void documentFiles.editCanvasSize();};}
+    else if(action==='Browser recovery…'){button.tabIndex=0;button.onclick=()=>{closeMenus();void documentFiles.recoverWorkspaces();};}
     else if(action==='Save changes'||action==='Save as…'||action==='Open file…'){button.tabIndex=0;button.onclick=()=>{closeMenus();void(action==='Open file…'?documentFiles.open():documentFiles.save(action==='Save as…'));};}
     else if(action==='Export…'){button.tabIndex=0;button.onclick=()=>exportDialog.open();}else disable(button);}
 }
@@ -305,7 +307,7 @@ function update():void {
   $('[data-fill-trigger]').classList.toggle('selected',editor.tool==='fill');
   $('[data-fill-trigger]').setAttribute('aria-pressed',String(editor.tool==='fill'));
   renderFillToolIcon($('[data-fill-trigger]'),editor.fillPaint,editor.noFill);
-  const colourItems=editor.selectedItems.filter(item=>item.data.role==='artwork'&&item.visible&&!item.locked&&item.layer.visible&&!item.layer.locked);
+  const colourItems=editor.selectedItems.filter(item=>item.data.role==='artwork'&&canEdit(item));
   const signature=colourItems.map(item=>`${item.data.uid}:${item.strokeColor?.toCSS(true)}:${item.fillColor?.toCSS(true)}:${item.opacity}:${JSON.stringify(item.data.fillPaint)}`).join('|');
   if(signature!==colourSelection){colourSelection=signature;const item=colourItems.at(-1),paint=item?.strokeColor??item?.fillColor;if(item?.data.fillPaint)colourPanel.setAppearance({...item.data.fillPaint,opacity:item.opacity});else if(!item)colourPanel.setAppearance(editor.fillPaint);else colourPanel.set({hex:paint?'#'+[paint.red,paint.green,paint.blue].map(n=>Math.round(n*255).toString(16).padStart(2,'0')).join(''):editor.fillColor,opacity:item?.opacity??editor.fillOpacity});}
   else if(lastFillPaint!==JSON.stringify(editor.fillPaint))colourPanel.setAppearance(editor.fillPaint);
@@ -335,14 +337,15 @@ function update():void {
   duplicateButton.hidden=!duplicatePoint;
   if(duplicatePoint){duplicateButton.style.left=`${duplicatePoint.x}px`;duplicateButton.style.top=`${duplicatePoint.y}px`;}
   const selected=editor.selected,bounds=editor.selectionBounds,count=editor.selectedItems.length;
-  for(const key of ['x','y','width','height'] as const){const input=$<HTMLInputElement>('#field-'+key);input.disabled=!bounds||((key==='width'||key==='height')&&bounds[key]<0.001);input.title=bounds&&(key==='width'||key==='height')&&bounds[key]<0.001?'Drag an endpoint to change direction':'';if(document.activeElement!==input){setLength(input,bounds?bounds[key]:null,({x:'X position',y:'Y position',width:'Width',height:'Height'})[key]);input.setAttribute('aria-invalid','false');input.closest('.number-shell')!.classList.remove('is-invalid');}}
-  rotationInput.disabled=!count;
+  for(const key of ['x','y','width','height'] as const){const input=$<HTMLInputElement>('#field-'+key);input.disabled=!editor.canFlipSelection||!bounds||((key==='width'||key==='height')&&bounds[key]<0.001);input.title=bounds&&(key==='width'||key==='height')&&bounds[key]<0.001?'Drag an endpoint to change direction':'';if(document.activeElement!==input){setLength(input,bounds?bounds[key]:null,({x:'X position',y:'Y position',width:'Width',height:'Height'})[key]);input.setAttribute('aria-invalid','false');input.closest('.number-shell')!.classList.remove('is-invalid');}}
+  rotationInput.disabled=!editor.canFlipSelection;
   if(document.activeElement!==rotationInput){rotationInput.value=count?String(Number(editor.selectionRotation.toFixed(6))):'';rotationInput.setAttribute('aria-invalid','false');rotationInput.closest('.number-shell')!.classList.remove('is-invalid');}
   $('#rotation-label').textContent=count>1?'By':'R';
   rotationInput.setAttribute('aria-label',count>1?'Rotate selection by (degrees)':'Rotation (degrees)');
   $('#rotation-help').textContent=count>1?'Rotate together around the selection centre. Enter an amount to add.':'Clockwise rotation about the centre. Shift-drag snaps to 15°.';
   $('#arc-controls').hidden=!editor.selectedArc;
-  for(const key of ['radius','start','sweep'] as const){const input=$<HTMLInputElement>('#arc-'+key);if(document.activeElement!==input){if(key==='radius')setLength(input,editor.selectedArc?.radius??null,'Radius');else input.value=editor.selectedArc?String(Number(editor.selectedArc[key].toFixed(6))):'';input.setAttribute('aria-invalid','false');input.closest('.number-shell')!.classList.remove('is-invalid');}}
+  for(const id of ['arc-semicircle','arc-flip','edit-text','text-font','text-property-size'])$<HTMLInputElement>('#'+id).disabled=!editor.canFlipSelection;
+  for(const key of ['radius','start','sweep'] as const){const input=$<HTMLInputElement>('#arc-'+key);input.disabled=!editor.canFlipSelection;if(document.activeElement!==input){if(key==='radius')setLength(input,editor.selectedArc?.radius??null,'Radius');else input.value=editor.selectedArc?String(Number(editor.selectedArc[key].toFixed(6))):'';input.setAttribute('aria-invalid','false');input.closest('.number-shell')!.classList.remove('is-invalid');}}
   $('#selection-name').textContent=count>1?`${count} objects selected · Combined bounds`:selected?`${selected.data.name} · ${selected.layer.name}`:'Select an object to edit its bounds.';
   objectProperties.render();
   $<HTMLButtonElement>('[aria-label="Undo"]').disabled=!editor.canUndo;$<HTMLButtonElement>('[aria-label="Redo"]').disabled=!editor.canRedo;

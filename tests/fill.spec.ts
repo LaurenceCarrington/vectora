@@ -39,8 +39,15 @@ test('Fill uses the right Colour panel in production and the reference, without 
     await page.getByRole('button',{name:'Colour fill',exact:true}).click();
     await expect(page.locator('#primary-fill-menu')).toHaveCount(0);await expect(page.locator('[data-fill-picker],[data-fill-hex],[data-fill-colour]')).toHaveCount(0);
     const panel=page.getByRole('region',{name:'Fill & appearance',exact:true});await expect(panel).toBeVisible();await expect(panel.getByRole('button',{name:'No fill',exact:true})).toHaveAttribute('aria-pressed','false');
-    await panel.getByRole('textbox',{name:'Hex colour',exact:true}).fill('#FF00FF');await panel.getByRole('textbox',{name:'Hex colour',exact:true}).press('Enter');await expect(page.locator('.fill-tools')).not.toHaveClass(/is-no-fill/);expect(await page.locator('.fill-tools').evaluate(el=>getComputedStyle(el).getPropertyValue('--fill-colour').trim().toUpperCase())).toBe('#FF00FF');
-    await panel.getByRole('button',{name:'No fill',exact:true}).click();await expect(page.locator('.fill-tools')).toHaveClass(/is-no-fill/);
+    await panel.getByRole('textbox',{name:'Hex colour',exact:true}).fill('#FF00FF');await panel.getByRole('textbox',{name:'Hex colour',exact:true}).press('Enter');
+    const icon=page.locator('[data-fill-trigger] svg'),painted=icon.locator('[data-fill-paint],[data-fill-drop]');
+    await expect(painted).toHaveCount(2);
+    for(const part of await painted.all()){await expect(part).toHaveAttribute('fill','#FF00FF');await expect(part).toHaveAttribute('fill-opacity','1');}
+    await expect(page.locator('[data-fill-trigger]')).toHaveAttribute('title','Colour fill (B) · #FF00FF · 100% opacity');
+    await panel.getByRole('button',{name:'No fill',exact:true}).click();
+    await expect(panel.getByRole('button',{name:'No fill',exact:true})).toHaveAttribute('aria-pressed','true');
+    for(const part of await painted.all())await expect(part).toHaveAttribute('fill','none');
+    await expect(page.locator('[data-fill-trigger]')).toHaveAttribute('title','Colour fill (B) · No fill');
   }
 });
 
@@ -101,13 +108,16 @@ test('No fill swatch clears a whole fill from the canvas and a colour exits clea
 });
 
 test('No fill preserves locked fills, hidden fills and the full stroke of filled outlines',async({page})=>{
-  await page.goto(DEV);const result=await page.evaluate(()=>{
+  await page.goto(DEV);const result=await page.evaluate(async()=>{
+    const {prepareDocument,encodeDocument}=await import('/src/documentFormat.ts');
     const p=(window as any).__paper,e=(window as any).__vectora;
     e.addShape(new p.Path.Rectangle({insert:false,rectangle:[0,0,40,40],strokeColor:'#383838'}),'Rectangle');const outline=e.selected;outline.fillColor=new p.Color('#00FFFF');
     e.addShape(new p.Path.Line({insert:false,from:[20,0],to:[20,40],strokeColor:'#383838'}),'Line');
     const protectedFill=outline.clone();protectedFill.strokeColor=null;protectedFill.data={uid:crypto.randomUUID(),role:'artwork'};protectedFill.locked=true;
-    const hidden=protectedFill.clone();hidden.locked=false;hidden.visible=false;
+    const hidden=protectedFill.clone();hidden.data={...hidden.data,uid:crypto.randomUUID()};hidden.locked=false;hidden.visible=false;
+    prepareDocument(encodeDocument(e,false));
     e.setFillColor('none');e.fillAt(new p.Point(10,10));
+    prepareDocument(encodeDocument(e,false));
     return {outline:!!outline.strokeColor&&!outline.fillColor&&outline.area===1600,locked:protectedFill.isInserted()&&!!protectedFill.fillColor,hidden:hidden.isInserted()&&!!hidden.fillColor,left:e.objects.filter((x:any)=>!x.locked&&x.visible&&x.fillColor).some((x:any)=>x.contains(new p.Point(10,10))),right:e.objects.filter((x:any)=>!x.locked&&x.visible&&x.fillColor).some((x:any)=>x.contains(new p.Point(30,10)))};
   });expect(result).toEqual({outline:true,locked:true,hidden:true,left:false,right:true});
 });

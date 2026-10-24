@@ -1,4 +1,5 @@
 import paper from 'paper';
+import {assertCircularIdentity} from './geometryCore/circularIdentity';
 import {documentPath} from './deletion';
 import {MIN_DIMENSION_MM,validNumber} from './units';
 import type {Shape} from './types';
@@ -8,7 +9,7 @@ const normalized=(angle:number)=>((angle%360)+360)%360;
 /** Recognise current geometry, never trust an object's editable name or stale primitive metadata. */
 export function preciseGeometry(item:Shape|null):PreciseGeometry|null {
  if(!(item instanceof paper.Path)||item.data.text||item.data.dimension)return null;
- if(item.data.arc){const a=item.data.arc;return {kind:'arc',x:a.cx,y:a.cy,radius:a.radius};}
+ if(item.data.arc){try{assertCircularIdentity(item);}catch{return null;}const a=item.data.arc;return {kind:'arc',x:a.cx,y:a.cy,radius:a.radius};}
  if(item.segments.length>128)return null;
  const path=documentPath(item);
  try{
@@ -46,6 +47,7 @@ export function preciseGeometry(item:Shape|null):PreciseGeometry|null {
 }
 /** Edits a detached copy, preserving styling, identity, transformations and stacking. */
 export function editedPreciseShape(source:paper.Path,geometry:PreciseGeometry,key:PreciseProperty,value:number):paper.Path {
+ if(source.data.arc!==undefined){assertCircularIdentity(source);if(geometry.kind!=='arc'||key!=='x'&&key!=='y')throw new Error('Use the dedicated Arc controls to preserve its circular parameters.');}
  if(!validNumber(value))throw new Error('Enter a finite value within ±1,000,000.');
  if((key==='radius'||key==='length')&&value<MIN_DIMENSION_MM)throw new Error('Use a dimension of at least 0.001 mm.');
  if(key==='count'&&(!Number.isInteger(value)||value<3||value>64))throw new Error('Use a whole number from 3 to 64.');

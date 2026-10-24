@@ -1,3 +1,4 @@
+import {canEdit} from './model/entityAccess';
 import paper from 'paper';
 import {layerType,layerRole} from './documentLayers';
 import { applyCutlineStyle } from './shapeStyles';
@@ -51,7 +52,7 @@ export function createStickerOutline(source: Shape, offsetDistanceMM: number): S
 
 export type OffsetSettings={distance:number;direction:'inward'|'outward';corners:'round'|'sharp'|'bevel'};
 export function offsetEligible(source:Shape):boolean {
-  return !source.data.text&&!source.data.dimension&&source.visible&&!source.locked&&source.layer.visible&&!source.layer.locked&&!source.layer.data.deleted&&pathsOf(source).length>0&&pathsOf(source).every(p=>p.closed&&p.curves.length>1);
+  return !source.data.text&&!source.data.dimension&&canEdit(source)&&pathsOf(source).length>0&&pathsOf(source).every(p=>p.closed&&p.curves.length>1);
 }
 /** Offsets closed occupied areas, including holes, in document millimetres. */
 export function createPathOffset(source:Shape,settings:OffsetSettings):Shape {

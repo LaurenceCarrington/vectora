@@ -1,17 +1,37 @@
+import {assertCircularIdentity,normalizedArcAngle} from './geometryCore/circularIdentity';
 import type paper from 'paper';
 import {createTextShape,isStrokeFont} from './text';
 import {flattenInDocument,pathsOf,validateGeometryInput} from './geometry';
 import {MAX_DXF_POINTS} from './processingLimits';
 import {documentPath} from './deletion';
-import {validNumber} from './units';
+import {validNumber,geometrySettings,MAX_COORDINATE_MM} from './units';
+import {CurveApproximationError,curveToleranceAfterAllowance} from './curveApproximationSafety';
 import type {Shape,Contour} from './types';
 
+/** Two 8-decimal coordinate writes (including optional move-to-origin),
+ * plus binary64 parse/translation allowance over the existing +/-1e6 domain.
+ * This is a serialization budget in mm, not a geometry equality epsilon. */
+export const DXF_SERIALIZATION_ALLOWANCE_MM=2*(1e-8+8*Number.EPSILON*MAX_COORDINATE_MM);
+function flattenedDXF(object:Shape,tolerance:number|undefined,maxPoints:number):Contour[]{
+ const requested=tolerance??geometrySettings.flattenToleranceMM;
+ let contours:Contour[];
+ try{contours=flattenInDocument(object,curveToleranceAfterAllowance(requested,DXF_SERIALIZATION_ALLOWANCE_MM),maxPoints);}
+ catch(error){if(error instanceof CurveApproximationError)throw new CurveApproximationError(error.reason,requested,error.boundMM);throw error;}
+ for(const {points,closed} of contours){
+  const rounded=points.map(p=>({x:Number(p.x.toFixed(8)),y:Number(p.y.toFixed(8))}));
+  for(let i=1;i<points.length+(closed&&points.length>1?1:0);i++){
+   const a=(i-1)%points.length,b=i%points.length;
+   if((points[a].x!==points[b].x||points[a].y!==points[b].y)&&rounded[a].x===rounded[b].x&&rounded[a].y===rounded[b].y)throw new CurveApproximationError('serialization',requested);
+  }
+ }
+ return contours;
+}
 /** Both DXF formats share the same document-space curve tolerance and font geometry. */
 export function exportContours(object:Shape,tolerance?:number,maxPoints=MAX_DXF_POINTS){
- validateDXFTolerance(tolerance);
- if(!object.data.text||!isStrokeFont(object.data.text.fontId))return flattenInDocument(object,tolerance,maxPoints);
+ validateDXFTolerance(tolerance);if(object.data.arc!==undefined)assertCircularIdentity(object);
+ if(!object.data.text||!isStrokeFont(object.data.text.fontId))return flattenedDXF(object,tolerance,maxPoints);
  const strokes=createTextShape(object.data.text,true);
- try{return flattenInDocument(strokes,tolerance,maxPoints);}finally{strokes.remove();}
+ try{return flattenedDXF(strokes,tolerance,maxPoints);}finally{strokes.remove();}
 }
 
 export interface CircularContour {kind:'CIRCLE'|'ARC';cx:number;cy:number;radius:number;start:number;end:number}
@@ -45,7 +65,16 @@ function circularContour(path:paper.Path):CircularContour|null {
  return {kind:path.closed?'CIRCLE':'ARC',cx,cy:-cy,radius,start:degrees(-(total>0?start+total:start)),end:degrees(-(total>0?start:start+total))};
 }
 export function standardContours(object:Shape,tolerance?:number,maxPoints=MAX_DXF_POINTS):StandardContour[]{
- validateGeometryInput([object]);
+ validateDXFTolerance(tolerance);if(object.data.arc!==undefined)assertCircularIdentity(object);validateGeometryInput([object]);
+ // Only a fully validated editable construction has authoritative nominal
+ // circular parameters. Avoid re-fitting its radius from nearly parallel
+ // endpoint normals (especially tiny/shallow arcs at large coordinates).
+ // Untagged curves retain the independent existing recognizer/fallback below.
+ if(object.data.arc!==undefined){
+  if(maxPoints<1)throw new Error('This drawing has too many curve points to export. Process fewer objects.');
+  const arc=object.data.arc;
+  return [{kind:'ARC',cx:arc.cx,cy:-arc.cy,radius:arc.radius,start:normalizedArcAngle(-(arc.sweep>0?normalizedArcAngle(arc.start)+arc.sweep:arc.start)),end:normalizedArcAngle(-(arc.sweep>0?arc.start:normalizedArcAngle(arc.start)+arc.sweep))}];
+ }
  if(object.data.text||object.data.dimension)return exportContours(object,tolerance,maxPoints).map(contour=>({kind:'LWPOLYLINE',contour}));
  let remaining=maxPoints;
  return pathsOf(object).flatMap<StandardContour>(source=>{
@@ -53,7 +82,9 @@ export function standardContours(object:Shape,tolerance?:number,maxPoints=MAX_DX
   try{
    const circular=circularContour(path);
    if(circular){if(remaining<1)throw new Error('This drawing has too many curve points to export. Process fewer objects.');remaining--;return [circular];}
-   const contours=flattenInDocument(path,tolerance,remaining);remaining-=contours.reduce((n,c)=>n+c.points.length,0);
+   // Flatten the original representation: a detached documentPath may round
+   // reconstructed handles before the arithmetic bound can account for them.
+   const contours=flattenedDXF(source,tolerance,remaining);remaining-=contours.reduce((n,c)=>n+c.points.length,0);
    return contours.map(contour=>({kind:'LWPOLYLINE' as const,contour}));
   }finally{path.remove();}
  });

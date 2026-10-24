@@ -1,3 +1,4 @@
+import {canEdit,EntityAccessError} from './model/entityAccess';
 import paper from 'paper';
 import type { CADEditor } from './editor';
 import type { Shape } from './types';
@@ -28,6 +29,7 @@ export class InlineText {
     window.addEventListener('blur',()=>{this.caret.style.display='none';});
     window.addEventListener('focus',()=>this.render());
     editor.onTextRequest=(point,source)=>{
+      if(source&&!canEdit(source)){editor.onMessage(new EntityAccessError().message,true);return;}
       if(this.active&&!this.finish())return;
       editor.cancel();
       const data:TextData=source?.data.text?structuredClone(source.data.text):{content:'',sizeMM:10,fontId:'lato',transform:[1,0,0,1,point!.x,point!.y]};
@@ -49,6 +51,7 @@ export class InlineText {
     if(active.source)active.source.visible=true;
     this.active=null;this.draftBounds=null;this.input.hidden=true;this.caret.style.display='none';this.editor.setTextEditing(false);
     try{
+      if(!cancel&&active.source&&!canEdit(active.source))throw new EntityAccessError();
       if(!cancel&&this.input.value.trim()){
         if(!active.source||this.input.value!==active.data.content||!active.data.glyphContours)this.editor.saveText(this.input.value,active.data.sizeMM,active.point,active.source?.data.uid??null,active.data.fontId);
       }else if(!cancel&&active.source){

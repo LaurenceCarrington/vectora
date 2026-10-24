@@ -1580,3 +1580,10 @@ input[type="color"]::-moz-color-swatch { border-radius:0; }
 .smooth-header button { cursor:pointer; }
 .smooth-specimen { position:relative; inset:auto; }
 .smooth-specimen.is-positioned { position:fixed; }
+
+/* Browser recovery uses the existing modal/button vocabulary. */
+#recovery-workspaces-dialog { width: min(620px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; }
+.recovery-workspace-list section { border-top: 1px solid currentColor; padding: 12px 0; }
+.recovery-workspace-list h3 { font: inherit; font-weight: 600; overflow-wrap: anywhere; }
+.recovery-workspace-list p { overflow-wrap: anywhere; }
+.recovery-workspace-list .button { margin-right: 8px; }

@@ -1,3 +1,7 @@
+import {canEdit,canSelectEditingTarget,canReferenceVisible,requireEditable,EntityAccessError} from './model/entityAccess';
+import {admitDocument,admitCopies} from './model/admission';
+import {MutationCheckpoint} from './model/mutationCheckpoint';
+import {safeDocumentView} from './documentFormat';
 import {CanvasGuide} from './canvasGuide';
 import {MAX_DOCUMENT_OBJECTS,MAX_DOCUMENT_LAYERS} from './processingLimits';
 import {preciseGeometry,editedPreciseShape,type PreciseProperty} from './shapeProperties';
@@ -25,6 +29,7 @@ import { createDeletePlan, disposeDeletePlan, documentPath, type DeletePlan } fr
 import { pathsOf,validateGeometryInput } from './geometry';
 import { closeNearestPaths } from './closePath';
 import { createTextShape, isStrokeFont, transformText, type TextData } from './text';
+import {assertCircularIdentity,adoptDetachedArcFrame,normalizedArcAngle} from './geometryCore/circularIdentity';
 import { createArc, createEndpointArc, arcPoint, createCircularArc, updateCircularArc, snapArcAngle, type ArcGeometry } from './arc';
 import { MillimetreGrid } from './grid';
 import { findObjectSnap, SNAP_LABELS, type ObjectSnap, type ObjectSnapMode, type SnapModes } from './objectSnapping';
@@ -35,7 +40,7 @@ import type { DocumentSnapshot, EditorSession, Shape, ToolName, ObjectRole } fro
 type Interaction = {
   id:number; kind:'pan'|'draw'|'move'|'resize'|'marquee'|'endpoint'|'arc-handle'|'rotate'; start:paper.Point; screen:paper.Point;
   center:paper.Point; before:DocumentSnapshot|null; cancelSelection:Shape[]; cancelLayer:string; item?:Shape; bounds?:paper.Rectangle;
-  rotationPivot?:paper.Point; rotationDelta?:number; arcGeometry?:ArcGeometry; handle?:number; items?:Shape[]; positions?:paper.Point[]; originals?:Shape[]; initialSelection?:Shape[]; snapSpacing:number|null; hasDragged?:boolean; drawPoint?:paper.Point; shift?:boolean;
+  rotationPivot?:paper.Point; rotationDelta?:number; arcGeometry?:ArcGeometry; arcInvalid?:string; handle?:number; items?:Shape[]; positions?:paper.Point[]; originals?:Shape[]; initialSelection?:Shape[]; snapSpacing:number|null; hasDragged?:boolean; drawPoint?:paper.Point; shift?:boolean;
 };
 export class CADEditor {
   readonly grid:MillimetreGrid;
@@ -60,7 +65,7 @@ export class CADEditor {
   get activeLayerId():string {return layerId(this.activeLayer??this.artwork);}
   get activeLayer():paper.Layer|undefined {return this.documentLayer(this.drawingLayerId)??this.documentLayers.find(layer=>layerRole(layer)==='artwork'&&layer.visible&&!layer.locked)??this.documentLayers.find(layer=>layer.visible&&!layer.locked)??this.documentLayers[0];}
   get drawingColor():string {return this.activeLayer?layerColour(this.activeLayer):artworkColor();}
-  setActiveLayer(id:string):void {if(!this.documentLayer(id))return;this.cancel();this.drawingLayerId=id;this.layerSelectionSignature=this.selectionSignature();this.changed();this.onDocumentChange();}
+  setActiveLayer(id:string):void {if(!this.documentLayer(id))return;if(this.textEditing)throw new Error('Finish or cancel the text draft before changing the active layer.');this.cancel();this.drawingLayerId=id;this.layerSelectionSignature=this.selectionSignature();this.changed();this.onDocumentChange();}
   private selectionSignature():string {return this.selection.map(item=>`${layerId(item.layer)}:${item.data.uid}`).join('|');}
   private syncDrawingLayer():void {
     const signature=this.selectionSignature(),layer=this.selection[0]?.layer;
@@ -105,7 +110,7 @@ export class CADEditor {
   onToolChange:(tool:ToolName)=>void=()=>{};
   onDocumentChange:(snapshot?:DocumentSnapshot)=>void=()=>{};
   onFillComplete:()=>void=()=>{};
-  get hasPendingGesture():boolean {return !!this.offsets?.active||!!this.patterns?.active||!!this.interaction||!!this.polyline||!!this.threePointArc||this.nodes.dragging||this.dimensions.active;}
+  get hasPendingGesture():boolean {return !!this.smoothing?.pending||!!this.layerColourEdit||!!this.offsets?.active||!!this.patterns?.active||!!this.interaction||!!this.polyline||!!this.threePointArc||this.nodes.dragging||this.dimensions.active;}
   onTextRequest:(point:paper.Point|null,target:Shape|null)=>void=()=>{};
   textEditing=false;
   private textEditingBounds:paper.Rectangle|null=null;
@@ -114,6 +119,7 @@ export class CADEditor {
     this.textEditingBounds=bounds.clone();this.drawOverlay();paper.view.update();
   }
   onMessage:(message:string,error?:boolean|AlertKind)=>void=()=>{};
+  private checkpoints=new WeakMap<DocumentSnapshot,{scene:MutationCheckpoint;selection:Shape[];layer:string;zoom:number;center:paper.Point;tool:ToolName;pasteCount:number;nodes:ReturnType<NodeEditing['captureSelection']>}>();
   private undoStack:{before:DocumentSnapshot;after:DocumentSnapshot}[]=[];
   private redoStack:{before:DocumentSnapshot;after:DocumentSnapshot}[]=[];
   private interaction:Interaction|null=null;
@@ -127,7 +133,7 @@ export class CADEditor {
     const sweep=state.item.data.arc?.sweep;
     return `Click to set angle${sweep?` · ${Number(Math.abs(sweep).toFixed(1))}°`:''} · Shift: 15°`;
   }
-  get selectedArc():ArcGeometry|null {return this.selected?.data.arc??null;}
+  get selectedArc():ArcGeometry|null {const item=this.selected;if(!item?.data.arc)return null;try{assertCircularIdentity(item);return item.data.arc;}catch{return null;}}
   get arcHint():string {return 'Drag from centre · Semicircle · Shift: 15°';}
   private deletionPreview:DeletePlan|null=null;
   get isDeleteTool():boolean {return this.tool==='dissect-delete'||this.tool==='line-delete';}
@@ -157,15 +163,15 @@ export class CADEditor {
     this.createDocumentLayer('raster','Raster Engrave','raster');
     this.artwork.activate();
     this.smoothing=new SelectionSmoothing(this,{changed:()=>this.changed(),commit:before=>this.commit(before)});
-    this.nodes=new NodeEditing(this,{changed:()=>this.changed(),commit:before=>this.commit(before),restore:before=>this.restore(before),snap:(point,spacing)=>this.snapPoint(point,spacing,undefined,false)});
+    this.nodes=new NodeEditing(this,{changed:()=>this.changed(),commit:before=>this.commit(before),restore:(before,publish=true)=>{this.rollbackMutation(before,true);if(publish)this.onDocumentChange(this.snapshot());},snap:(point,spacing)=>this.snapPoint(point,spacing,undefined,false)});
     this.dimensions=new DimensionTools(this,{changed:()=>this.changed(),snap:point=>this.snapPoint(point,this.gridSnappingActive?this.grid.spacingMM:null)});
     this.patterns=new ObjectPatterns(this,{changed:()=>this.changed(),snap:point=>this.snapPoint(point,this.gridSnappingActive?this.grid.spacingMM:null,undefined,false),apply:copies=>{
-      const before=this.snapshot(),originals=[...this.selection];
+      admitCopies(this,copies.map(({copy})=>copy));const before=this.mutationSnapshot(),originals=[...this.selection];
       for(const {source,copy} of copies)source.layer.addChild(copy);
       this.selection=[...originals,...copies.map(({copy})=>copy)];this.commit(before);
     }});
     this.offsets=new PathOffsets(this,{changed:()=>this.changed(),apply:copies=>{
-      const before=this.snapshot();
+      admitCopies(this,copies.map(({copy})=>copy));const before=this.mutationSnapshot();
       for(const {source,copy} of copies)source.layer.insertChild(source.index+1,copy);
       this.nodes.clear();this.selection=copies.map(({copy})=>copy);this.commit(before);
     }});
@@ -176,12 +182,12 @@ export class CADEditor {
     canvas.addEventListener('pointermove',this.pointerMove);
     canvas.addEventListener('pointerup',this.pointerUp);
     canvas.addEventListener('pointerleave',()=>{this.activeObjectSnap=null;this.changed();if(this.deletionPreview){this.clearDeletePreview();this.changed();}});
-    canvas.addEventListener('dblclick',event=>{if(this.tool==='nodes'){event.preventDefault();const r=this.canvas.getBoundingClientRect();this.nodes.add(paper.view.viewToProject(new paper.Point(event.clientX-r.left,event.clientY-r.top)));}else if(this.polyline){event.preventDefault();this.finishPolyline();}else if(this.tool==='select'&&this.selected?.data.dimension?.kind==='leader'){event.preventDefault();this.dimensions.editSelected();}else if(this.tool==='select'&&this.selected?.data.text){event.preventDefault();this.onTextRequest(null,this.selected);}});
+    canvas.addEventListener('dblclick',event=>{try{if(this.tool==='nodes'){event.preventDefault();const r=this.canvas.getBoundingClientRect();this.nodes.add(paper.view.viewToProject(new paper.Point(event.clientX-r.left,event.clientY-r.top)));}else if(this.polyline){event.preventDefault();this.finishPolyline();}else if(this.tool==='select'&&this.selected?.data.dimension?.kind==='leader'){event.preventDefault();this.dimensions.editSelected();}else if(this.tool==='select'&&this.selected?.data.text){event.preventDefault();this.onTextRequest(null,this.selected);}}catch(error){this.onMessage((error as Error).message,true);}});
     canvas.addEventListener('pointercancel',()=>this.cancel());
     canvas.addEventListener('lostpointercapture',()=>{if(this.interaction||this.nodes.dragging)this.cancel();});
     canvas.addEventListener('wheel',this.wheel,{passive:false});
     canvas.addEventListener('contextmenu',event=>{event.preventDefault();if(this.tool==='nodes'){const r=this.canvas.getBoundingClientRect();this.nodes.context(paper.view.viewToProject(new paper.Point(event.clientX-r.left,event.clientY-r.top)));}});
-    window.addEventListener('keydown',this.keyDown);
+    window.addEventListener('keydown',event=>{try{this.keyDown(event);}catch(error){this.onMessage((error as Error).message,true);}});
     window.addEventListener('keyup',e=>{if(e.code==='Space'){this.space=false;this.updateCursor();}});
     window.addEventListener('blur',()=>{this.space=false;this.cancel();});
     this.resize();
@@ -190,7 +196,7 @@ export class CADEditor {
   get objects():Shape[] {return [this.artwork,...this.extraLayers,this.cutlines].filter(layer=>!layer.data.deleted).flatMap(layer=>layer.children) as Shape[];}
   documentLayer(id:string):paper.Layer|undefined {return this.documentLayers.find(layer=>layerId(layer)===id);}
   private isClosedShape(item:Shape):boolean {return item instanceof paper.Path?item.closed:item.children.every(child=>(child as paper.Path).closed);}
-  get canOutlineSelection():boolean {return !!this.selected&&!this.selected.data.dimension&&this.isClosedShape(this.selected);}
+  get canOutlineSelection():boolean {return !!this.selected&&this.isEditable(this.selected)&&!this.selected.data.dimension&&this.isClosedShape(this.selected);}
   private get hasEndpointHandles():boolean {return this.selected instanceof paper.Path&&!this.selected.closed&&this.selected.segments.length===2&&this.selected.segments.every(segment=>segment.handleIn.isZero()&&segment.handleOut.isZero());}
   get canUndo():boolean {return this.undoStack.length>0;}
   get canRedo():boolean {return this.redoStack.length>0;}
@@ -209,7 +215,7 @@ export class CADEditor {
     if(this.canvasSize.kind==='fixed')this.fitCanvas();
   }
   setCanvasSize(value:CanvasSize,grid:GridConfig=this.grid.config):void {
-    const size=validateCanvasSize(value),settings=validateGridSettings(grid);this.cancel();const before=this.snapshot();this.canvasSize=size;this.grid.applyConfig(settings,true);
+    const size=validateCanvasSize(value),settings=validateGridSettings(grid);this.cancel();const before=this.mutationSnapshot();this.canvasSize=size;this.grid.applyConfig(settings,true);
     if(size.kind==='fixed')this.fitCanvas();this.commit(before);
   }
   private fitCanvas():void {
@@ -231,13 +237,17 @@ export class CADEditor {
     this.updateCursor();this.changed();
   }
   loadDocument(snapshot:DocumentSnapshot,view:{zoom:number;center:[number,number]}):void {
-    this.cancel();const before=this.snapshot(),oldZoom=paper.view.zoom,oldCenter=paper.view.center.clone();
+    if(this.textEditing)throw new Error('Finish or cancel the text draft before replacing the drawing.');
+    this.cancel();const before=this.mutationSnapshot(),oldZoom=paper.view.zoom,oldCenter=paper.view.center.clone();
     try{
-      this.restore(snapshot);paper.view.zoom=view.zoom;paper.view.center=new paper.Point(...view.center);
-      this.tool='select';this.updateCursor();this.undoStack=[];this.redoStack=[];this.changed();
-    }catch(error){this.restore(before);paper.view.zoom=oldZoom;paper.view.center=oldCenter;this.changed();throw error;}
+      this.restore(snapshot,false);admitDocument(this);const camera=safeDocumentView(view);paper.view.zoom=camera.zoom;paper.view.center=new paper.Point(...camera.center);
+      this.tool='select';this.updateCursor();this.undoStack=[];this.redoStack=[];this.changed();this.onDocumentChange(this.snapshot());this.checkpoints.delete(before);
+    }catch(error){this.rollbackMutation(before);paper.view.zoom=oldZoom;paper.view.center=oldCenter;this.changed();throw error;}
   }
-  private restore(snapshot:DocumentSnapshot):void {
+  private restore(snapshot:DocumentSnapshot,publish=true):void {
+    // Keep the legacy restore facade, including tests/session helpers, behind
+    // the same admitted restore bridge. Only its internal projection is raw.
+    if(publish){if(this.hasPendingGesture)this.cancel();this.applyHistory(snapshot);this.onDocumentChange(this.snapshot());return;}
     this.canvasSize=validateCanvasSize(snapshot.canvasSize);this.grid.applyConfig(snapshot.grid);
     this.offsets.cancel();this.patterns.cancel();this.dimensions.cancel();this.nodes.clear();
     this.selected=null; this.artwork.removeChildren();this.cutlines.removeChildren();
@@ -255,9 +265,29 @@ export class CADEditor {
     const byId=new Map(this.objects.map(item=>[item.data.uid,item]));
     this.selection=[...new Set<string>(ids)].flatMap(id=>{const item=byId.get(id);return item&&this.isEditable(item)?[item]:[];});
     this.drawingLayerId=snapshot.activeLayerId??'artwork';this.layerSelectionSignature=this.selectionSignature();
-    this.artwork.activate();this.changed();this.onDocumentChange(snapshot);
+    this.artwork.activate();this.changed();
   }
-  private commit(before:DocumentSnapshot):void {
+  /** Legacy gestures may preview on live items; only this snapshot owns rollback. */
+  mutationSnapshot():DocumentSnapshot {
+    const before=this.snapshot();
+    this.checkpoints.set(before,{scene:new MutationCheckpoint([this.artwork,this.cutlines,...this.extraLayers]),selection:[...this.selection],layer:this.drawingLayerId,zoom:paper.view.zoom,center:paper.view.center.clone(),tool:this.tool,pasteCount:this.pasteCount,nodes:this.nodes.captureSelection()});
+    return before;
+  }
+  private rollbackMutation(before:DocumentSnapshot,preserveAccess=false):void {
+    const checkpoint=this.checkpoints.get(before);
+    if(!checkpoint){this.restore(before,false);return;}
+    checkpoint.scene.restore([this.artwork,this.cutlines,...this.extraLayers],preserveAccess);
+    this.extraLayers=checkpoint.scene.layers.filter(layer=>layer!==this.artwork&&layer!==this.cutlines);
+    for(const layer of checkpoint.scene.layers)layer.insertBelow(this.overlays);
+    const toolChanged=this.tool!==checkpoint.tool;this.tool=checkpoint.tool;this.pasteCount=checkpoint.pasteCount;this.nodes.restoreSelection(checkpoint.nodes);
+    this.selection=[...checkpoint.selection];this.drawingLayerId=checkpoint.layer;this.layerSelectionSignature=this.selectionSignature();
+    this.canvasSize=validateCanvasSize(before.canvasSize);this.grid.applyConfig(before.grid);
+    paper.view.zoom=checkpoint.zoom;paper.view.center=checkpoint.center;
+    this.checkpoints.delete(before);this.artwork.activate();this.updateCursor();this.changed();if(toolChanged)this.onToolChange(this.tool);
+  }
+  private commit(before:DocumentSnapshot,layerAdministration=false):void {
+    try{if(this.hasPendingGesture||this.textEditing)throw new Error('Finish or cancel the current edit before changing the drawing.');this.checkpoints.get(before)?.scene.assertAccess([this.artwork,this.cutlines,...this.extraLayers],layerAdministration);admitDocument(this);}catch(error){this.rollbackMutation(before,error instanceof EntityAccessError);throw error;}
+    this.checkpoints.delete(before);
     // History must include the same drawing destination that the UI displays.
     this.syncDrawingLayer();
     const after=this.snapshot();
@@ -266,15 +296,22 @@ export class CADEditor {
     }
     this.changed();this.onDocumentChange(after);
   }
-  undo():void {this.cancel();const entry=this.undoStack.pop();if(entry){this.redoStack.push(entry);this.restore(entry.before);}}
-  redo():void {this.cancel();const entry=this.redoStack.pop();if(entry){this.undoStack.push(entry);this.restore(entry.after);}}
-  private isEditable(item:Shape):boolean {return !item.layer.data.deleted && item.layer.visible && !item.layer.locked;}
+  private applyHistory(snapshot:DocumentSnapshot):void {
+    if(this.textEditing)throw new Error('Finish or cancel the text draft before restoring the drawing.');
+    const before=this.mutationSnapshot();
+    try{this.restore(snapshot,false);admitDocument(this);this.checkpoints.delete(before);}
+    catch(error){this.rollbackMutation(before);throw error;}
+  }
+  undo():void {this.cancel();const entry=this.undoStack.at(-1);if(entry){this.applyHistory(entry.before);this.undoStack.pop();this.redoStack.push(entry);this.changed();this.onDocumentChange(this.snapshot());}}
+  redo():void {this.cancel();const entry=this.redoStack.at(-1);if(entry){this.applyHistory(entry.after);this.redoStack.pop();this.undoStack.push(entry);this.changed();this.onDocumentChange(this.snapshot());}}
+  private isEditable(item:Shape):boolean {return canSelectEditingTarget(item)&&typeof item.layer.data.documentId==='string'&&item.project===this.artwork.project;}
+  private requireSelectionAccess():void {if(this.selection.some(item=>!this.isEditable(item))){if(this.hasPendingGesture)this.cancel();throw new EntityAccessError();}}
   private createDocumentLayer(role:ObjectRole,name:string,id:string):paper.Layer {
     const layer=new paper.Layer({name,data:{documentId:id,objectRole:role,role:`${role}-layer`}});
     layer.insertBelow(this.overlays);this.extraLayers.push(layer);this.artwork.activate();return layer;
   }
   addDocumentLayer(role:ObjectRole='artwork',custom=false):paper.Layer {
-    this.cancel();const before=this.snapshot(),base=role==='artwork'?this.artwork:role==='cutline'?this.cutlines:undefined;
+    this.cancel();admitCopies(this,[],0,1);const before=this.mutationSnapshot(),base=role==='artwork'?this.artwork:role==='cutline'?this.cutlines:undefined;
     let layer:paper.Layer;
     if(!custom&&base?.data.deleted){layer=base;layer.data.deleted=false;layer.visible=true;layer.locked=false;}
     else{
@@ -286,24 +323,28 @@ export class CADEditor {
   }
   deleteDocumentLayer(id:string):boolean {
     this.cancel();const layer=this.documentLayer(id);if(!layer||layer.locked)return false;
-    const before=this.snapshot();this.selection=this.selection.filter(item=>item.layer!==layer);layer.removeChildren();
+    requireEditable(layer.children);const before=this.mutationSnapshot();this.selection=this.selection.filter(item=>item.layer!==layer);layer.removeChildren();
     if(layer===this.artwork||layer===this.cutlines){layer.data.deleted=true;layer.visible=false;}
     else{this.extraLayers=this.extraLayers.filter(item=>item!==layer);layer.remove();}
-    this.artwork.activate();this.commit(before);return true;
+    this.artwork.activate();this.commit(before,true);return true;
   }
   renameDocumentLayer(id:string,value:string):void {
     const name=validateLayerName(value);this.cancel();const layer=this.documentLayer(id);
     if(!layer||!isCustomLayer(layer)||layer.locked)return;
-    const before=this.snapshot();layer.name=name;this.commit(before);
+    const before=this.mutationSnapshot();layer.name=name;this.commit(before);
   }
   setDocumentLayerColour(id:string,value:string,commit=true):void {
     const colour=validateLayerColour(value);let layer=this.documentLayer(id);
-    if(!layer||!isCustomLayer(layer)||layer.locked)return;
+    if(!layer||!isCustomLayer(layer))return;
+    if(layer.locked||!layer.children.every(canEdit)){
+      const edit=this.layerColourEdit;if(edit?.id===id){this.layerColourEdit=null;this.rollbackMutation(edit.before,true);}
+      throw new EntityAccessError();
+    }
     if(!this.layerColourEdit||this.layerColourEdit.id!==id){
       this.cancel();layer=this.documentLayer(id);if(!layer||!isCustomLayer(layer)||layer.locked)return;
-      this.layerColourEdit={id,before:this.snapshot(),initial:layerColour(layer).toUpperCase(),stored:layer.data.colour};
+      requireEditable(layer.children);this.layerColourEdit={id,before:this.mutationSnapshot(),initial:layerColour(layer).toUpperCase(),stored:layer.data.colour};
     }
-    const edit=this.layerColourEdit;
+    requireEditable(layer.children);const edit=this.layerColourEdit;
     layer.data.colour=!commit&&colour===edit.initial?edit.stored:colour;
     const ink=new paper.Color(layerColour(layer));
     for(const item of layer.children)this.recolourForLayer(item,layer,ink);
@@ -318,11 +359,11 @@ export class CADEditor {
     const edit=this.layerColourEdit;if(!edit)return;this.layerColourEdit=null;this.commit(edit.before);
   }
   setLayerState(id:string,key:'visible'|'locked',value:boolean):void {
-    this.cancel();const layer=this.documentLayer(id);if(!layer)return;const before=this.snapshot();layer[key]=value;
+    this.cancel();const layer=this.documentLayer(id);if(!layer)return;const before=this.mutationSnapshot();layer[key]=value;
     this.selection=this.selection.filter(item=>this.isEditable(item));this.commit(before);
   }
   canMoveSelectionToLayer(id:string):boolean {
-    const layer=this.documentLayer(id);return !!layer&&layer.visible&&!layer.locked&&this.selection.some(item=>item.layer!==layer&&this.isEditable(item));
+    const layer=this.documentLayer(id);return !!layer&&layer.visible&&!layer.locked&&this.selection.every(item=>this.isEditable(item))&&this.selection.some(item=>item.layer!==layer&&this.isEditable(item));
   }
   moveSelectionToLayer(id:string):number {
     return this.moveObjectsToLayer(id,this.selection);
@@ -330,8 +371,9 @@ export class CADEditor {
   moveObjectsToLayer(id:string,objects:readonly Shape[]):number {
     this.cancel();const layer=this.documentLayer(id);if(!layer)throw new Error('Choose an available destination layer.');
     if(!layer.visible||layer.locked)throw new Error(`Show and unlock ${layer.name} before moving objects.`);
-    const items=objects.filter(item=>this.objects.includes(item)&&item.layer!==layer&&this.isEditable(item));
-    if(!items.length)return 0;const before=this.snapshot(),role=layerRole(layer);
+    requireEditable(objects);if(objects.some(item=>!this.objects.includes(item)))throw new EntityAccessError();
+    const items=objects.filter(item=>item.layer!==layer);
+    if(!items.length)return 0;const before=this.mutationSnapshot(),role=layerRole(layer);
     for(const item of items){layer.addChild(item);item.data.role=role;this.styleForLayer(item,layer);}
     this.selection=items;this.commit(before);return items.length;
   }
@@ -359,7 +401,7 @@ export class CADEditor {
   }
   get canCopySelection():boolean {return this.canFlipSelection;}
   get canPaste():boolean {return this.clipboard.length>0&&!this.textEditing&&!this.nodes.dragging&&!this.dimensions.active&&!this.interaction&&!this.polyline&&!this.threePointArc;}
-  copySelection():void {
+  copySelection():void {this.requireSelectionAccess();
     if(!this.canCopySelection)return;
     const copies=this.selection.map(source=>{
       const copy=source.clone({insert:false}) as Shape;
@@ -370,7 +412,7 @@ export class CADEditor {
   }
   pasteSelection(point?:paper.Point):void {
     if(!this.canPaste)return;
-    const layer=this.drawingLayer(),before=this.snapshot(),copies:Shape[]=[];
+    admitCopies(this,this.clipboard);const layer=this.drawingLayer(),before=this.mutationSnapshot(),copies:Shape[]=[];
     const destination=point&&(this.gridSnappingActive?this.grid.snap(point):point);
     const offset=destination?destination.subtract(this.clipboardBounds!.center):new paper.Point(10*(this.pasteCount+1),10*(this.pasteCount+1));
     const matrix=new paper.Matrix().translate(offset);
@@ -407,10 +449,11 @@ export class CADEditor {
   }
   setPaint(color:string,opacity:number,applySelection=false):void {
     if(!/^#[0-9a-f]{6}$/i.test(color)||!Number.isFinite(opacity)||opacity<0||opacity>1)throw new Error('Enter a valid colour and opacity.');
+    if(applySelection&&!this.hasPendingGesture&&!this.textEditing)this.requireSelectionAccess();
     this.fillColor=color.toUpperCase();this.fillOpacity=opacity;this.noFill=false;this.fillPaint={kind:'colour',colour:this.fillColor,opacity};
     const items=applySelection&&!this.hasPendingGesture&&!this.textEditing?this.selectedItems.filter(item=>item.data.role==='artwork'&&item.visible&&!item.locked&&this.isEditable(item)):[];
     if(!items.length){this.changed();return;}
-    const before=this.snapshot();
+    const before=this.mutationSnapshot();
     for(const item of items){
       const visit=(child:paper.Item):void=>{if(child.strokeColor)child.strokeColor=new paper.Color(color);if(child.fillColor)child.fillColor=new paper.Color(color);child.children?.forEach(visit);};
       visit(item);delete item.data.fillPaint;item.opacity=opacity;item.data.customColour=color.toUpperCase();
@@ -421,9 +464,10 @@ export class CADEditor {
   setFillPaint(value:FillPaint,applySelection=false):void {
     const paint=validateFillPaint(value);
     if(paint.kind==='colour'){this.setPaint(paint.colour,paint.opacity,applySelection);return;}
+    if(applySelection&&!this.hasPendingGesture&&!this.textEditing)this.requireSelectionAccess();
     this.fillPaint=paint;this.fillColor=paintColour(paint);this.fillOpacity=paint.opacity;this.noFill=false;
     const items=applySelection&&!this.hasPendingGesture&&!this.textEditing?this.selectedItems.filter(item=>item.data.role==='artwork'&&item.fillColor&&item.visible&&!item.locked&&this.isEditable(item)):[];
-    if(!items.length){this.changed();return;}const before=this.snapshot();
+    if(!items.length){this.changed();return;}const before=this.mutationSnapshot();
     for(const item of items)applyFillPaint(item,paint);
     this.commit(before);
   }
@@ -433,7 +477,7 @@ export class CADEditor {
     if(layer.data.deleted||!layer.visible||layer.locked)throw new Error('Show and unlock Artwork before filling.');
     const region=regionAt(this.objects,point);
     if(!region){this.onMessage('Click inside an enclosed area. Open gaps cannot be filled.','information');return;}
-    const before=this.snapshot();
+    const before=this.mutationSnapshot();
     const existing=this.objects.find(item=>item.data.regionFill&&this.isEditable(item)&&item.layer===layer&&item.compare(region));
     if(existing){region.remove();existing.fillColor=new paper.Color(this.fillColor);existing.data.regionFillColor=this.fillColor;delete existing.data.customColour;this.styleForLayer(existing,layer);this.selected=existing;}
     else{
@@ -468,7 +512,7 @@ export class CADEditor {
     }catch(error){for(const plan of plans)plan.remainder?.remove();throw error;}
     finally{region.remove();}
     if(!plans.length)return;
-    const before=this.snapshot();
+    requireEditable(plans.map(plan=>plan.item));const before=this.mutationSnapshot();
     for(const {item,remainder} of plans){
       if(remainder){
         remainder.style=item.style;remainder.opacity=item.opacity;remainder.strokeColor=null;
@@ -509,7 +553,7 @@ export class CADEditor {
   setGridSpacing(spacing:number):void {this.setDocumentGrid({...this.grid.config,spacing});}
   private setDocumentGrid(value:GridConfig):void {
     const settings=validateGridSettings(value);if(JSON.stringify(settings)===JSON.stringify(this.grid.config))return;
-    this.cancel();const before=this.snapshot();this.grid.applyConfig(settings,true);this.commit(before);
+    this.cancel();const before=this.mutationSnapshot();this.grid.applyConfig(settings,true);this.commit(before);
   }
   setSnapToGrid(enabled:boolean):void {
     if(this.snapToGridEnabled===enabled)return;
@@ -522,7 +566,7 @@ export class CADEditor {
     this.activeObjectSnap=objectSnaps&&this.snappingEnabled?findObjectSnap(this.objects,point,10/paper.view.zoom,this.objectSnapModes,anchor,this.interaction?.items??[]):null;
     return this.activeObjectSnap?.point??(spacing===null?point:this.grid.snap(point,spacing));
   }
-  deleteSelection():void {this.cancel();if(!this.selection.length)return;const before=this.snapshot();for(const item of this.selection)item.remove();this.selected=null;this.commit(before);}
+  deleteSelection():void {this.requireSelectionAccess();this.cancel();if(!this.selection.length)return;const before=this.mutationSnapshot();for(const item of this.selection)item.remove();this.selected=null;this.commit(before);}
   saveText(content:string,sizeMM:number,point:paper.Point|null,uid:string|null,fontId?:string):void {
     const source=uid?this.objects.find(item=>item.data.uid===uid):undefined;
     if(uid&&(!source?.data.text||!this.isEditable(source)))throw new Error('Select editable text to update it.');
@@ -530,16 +574,16 @@ export class CADEditor {
     const shape=createTextShape(data);
     if(![shape.bounds.left,shape.bounds.right,shape.bounds.top,shape.bounds.bottom].every(validNumber)){shape.remove();throw new Error('Text exceeds the document limits.');}
     if(source){
-      const before=this.snapshot();shape.style=source.style;shape.data={...structuredClone(source.data),text:shape.data.text};
+      const before=this.mutationSnapshot();shape.style=source.style;shape.data={...structuredClone(source.data),text:shape.data.text};
       source.parent.insertChild(source.index,shape);source.remove();this.selected=shape;this.commit(before);
     }else{this.addShape(shape,'Text');this.setTool('select');}
   }
   updateCallout(uid:string,text:string):void {
-    const source=this.objects.find(item=>item.data.uid===uid);if(!source||!this.isEditable(source)||source.data.dimension?.kind!=='leader')return;
-    const before=this.snapshot();source.data.dimension={...structuredClone(source.data.dimension),text};this.commit(before);
+    if(this.hasPendingGesture)this.cancel();const source=this.objects.find(item=>item.data.uid===uid);if(!source||source.data.dimension?.kind!=='leader')return;requireEditable([source]);
+    const before=this.mutationSnapshot();source.data.dimension={...structuredClone(source.data.dimension),text};this.commit(before);
   }
-  get canConvertText():boolean {return !this.textEditing&&!this.dimensions.active&&!this.interaction&&!this.polyline&&!this.threePointArc&&this.selection.some(item=>item.data.text&&this.isEditable(item));}
-  convertTextToPaths():void {
+  get canConvertText():boolean {return !this.textEditing&&!this.dimensions.active&&!this.interaction&&!this.polyline&&!this.threePointArc&&this.selection.every(item=>this.isEditable(item))&&this.selection.some(item=>item.data.text&&this.isEditable(item));}
+  convertTextToPaths():void {this.requireSelectionAccess();
     if(!this.canConvertText)return;
     const engraving=new Map<Shape,Shape>();
     try{
@@ -549,7 +593,7 @@ export class CADEditor {
       const counts=(item.data.text as TextData).glyphContours;
       if(!counts||counts.reduce((a,b)=>a+b,0)!==pathsOf(item).length)throw new Error('Edit and save this text before converting it.');
     }
-    const before=this.snapshot(),selection:Shape[]=[];
+    const before=this.mutationSnapshot(),selection:Shape[]=[];
     for(const item of this.selection){
       if(!item.data.text||!this.isEditable(item)){selection.push(item);continue;}
       const geometry=engraving.get(item)??item,text=geometry.data.text as TextData,paths=pathsOf(geometry);
@@ -572,7 +616,7 @@ export class CADEditor {
   canArrangeSelection(action:ArrangementAction):boolean {
     return !this.hasPendingGesture&&!this.textEditing&&this.selection.length>=(action.startsWith('distribute-')?3:2)&&this.selection.every(item=>item.visible&&!item.locked&&this.isEditable(item));
   }
-  arrangeSelection(action:ArrangementAction):void {
+  arrangeSelection(action:ArrangementAction):void {this.requireSelectionAccess();
     if(!this.canArrangeSelection(action))return;
     const offsets=arrangementOffsets(this.selection.map(item=>this.objectBounds(item)),action),replacements=new Map<Shape,Shape>();
     try{
@@ -587,17 +631,17 @@ export class CADEditor {
       }
     }catch(error){replacements.forEach(copy=>copy.remove());throw error;}
     if(!replacements.size)return;
-    const before=this.snapshot();
+    const before=this.mutationSnapshot();
     for(const [source,copy] of replacements){source.parent.insertChild(source.index,copy);source.remove();}
     this.selection=this.selection.map(source=>replacements.get(source)??source);this.nodes.clear();this.commit(before);
   }
   get canApplyShapeOperation():boolean {
     return !this.hasPendingGesture&&!this.textEditing&&eligibleForShapeOperation(this.selection);
   }
-  applyShapeOperation(operation:ShapeOperation):void {
+  applyShapeOperation(operation:ShapeOperation):void {this.requireSelectionAccess();
     if(!this.canApplyShapeOperation)return;
     const sources=[...this.selection].sort((a,b)=>a.index-b.index),result=buildShapeOperation(sources,operation);
-    const before=this.snapshot(),base=sources[0];
+    const before=this.mutationSnapshot(),base=sources[0];
     base.parent.insertChild(base.index,result);sources.forEach(source=>source.remove());
     this.nodes.clear();this.selected=result;this.commit(before);
   }
@@ -605,9 +649,9 @@ export class CADEditor {
     return !this.dimensions.active&&!this.interaction&&!this.polyline&&!this.threePointArc&&this.selection.length>1&&
       this.selection.every(item=>this.isEditable(item)&&!item.data.text&&!item.data.dimension&&item.layer===this.selection[0].layer);
   }
-  joinSelection():void {
+  joinSelection():void {this.requireSelectionAccess();
     if(!this.canJoinSelection)return;
-    const before=this.snapshot(),sources=[...this.selection].sort((a,b)=>a.index-b.index),first=sources[0];
+    const before=this.mutationSnapshot(),sources=[...this.selection].sort((a,b)=>a.index-b.index),first=sources[0];
     const joined=new paper.CompoundPath({insert:false,children:sources.flatMap(pathsOf).map(documentPath)});
     joined.style=first.style;joined.opacity=first.opacity;joined.strokeColor=first.strokeColor??(first.data.role==='artwork'&&first.data.fillPaint?new paper.Color(first.data.customColour):first.fillColor);joined.fillColor=null;
     joined.data={uid:crypto.randomUUID(),role:first.data.role,name:'Joined shape',joined:true,customColour:first.data.customColour,customStroke:first.data.customStroke};
@@ -616,11 +660,11 @@ export class CADEditor {
   }
   get canExplodeSelection():boolean {
     return !this.textEditing&&!this.nodes.dragging&&!this.dimensions.active&&!this.interaction&&!this.polyline&&!this.threePointArc&&
-      this.selection.some(item=>item instanceof paper.CompoundPath&&item.children.length>0&&!item.data.text&&!item.data.dimension&&this.isEditable(item));
+      this.selection.every(item=>this.isEditable(item))&&this.selection.some(item=>item instanceof paper.CompoundPath&&item.children.length>0&&!item.data.text&&!item.data.dimension&&this.isEditable(item));
   }
-  explodeSelection():void {
+  explodeSelection():void {this.requireSelectionAccess();
     if(!this.canExplodeSelection)return;
-    const before=this.snapshot(),selection:Shape[]=[];
+    const before=this.mutationSnapshot(),selection:Shape[]=[];
     for(const source of this.selection){
       if(!(source instanceof paper.CompoundPath)||source.data.text||source.data.dimension||!this.isEditable(source)){selection.push(source);continue;}
       let index=source.index;
@@ -637,14 +681,14 @@ export class CADEditor {
     return this.selection.filter(item=>this.isEditable(item)&&!item.data.dimension&&pathsOf(item).some(path=>!path.closed&&path.segments.length>1));
   }
   get canCloseSelection():boolean {
-    if(this.dimensions.active||this.interaction||this.polyline||this.threePointArc)return false;
+    if(this.dimensions.active||this.interaction||this.polyline||this.threePointArc||!this.selection.every(item=>this.isEditable(item)))return false;
     const sources=this.closePathSources,paths=sources.flatMap(pathsOf).filter(path=>!path.closed&&path.segments.length>1);
     return sources.length>0&&sources.every(item=>item.layer===sources[0].layer)&&
       (paths.length>1||paths.some(path=>path.segments.length>2||path.curves.some(curve=>!curve.isStraight())));
   }
-  closeSelection():void {
+  closeSelection():void {this.requireSelectionAccess();
     if(!this.canCloseSelection)return;
-    const sources=this.closePathSources,before=this.snapshot(),first=sources[0];
+    const sources=this.closePathSources,before=this.mutationSnapshot(),first=sources[0];
     const contours=sources.flatMap(pathsOf),open=contours.filter(path=>!path.closed&&path.segments.length>1);
     const closed=closeNearestPaths(open),retained=contours.filter(path=>!open.includes(path)).map(documentPath);
     const result:Shape=retained.length?new paper.CompoundPath({insert:false,children:[...retained,closed]}):closed;
@@ -659,14 +703,14 @@ export class CADEditor {
   }
   get duplicateControlPoint():paper.Point|null {
     const bounds=this.selectionBounds;
-    return bounds&&!this.offsets?.active&&!this.patterns?.active&&this.tool!=='nodes'&&!this.textEditing&&!this.isDeleteTool&&!this.dimensions.active&&!this.interaction&&!this.polyline&&!this.threePointArc&&!this.space
+    return bounds&&this.selection.every(item=>this.isEditable(item))&&!this.offsets?.active&&!this.patterns?.active&&this.tool!=='nodes'&&!this.textEditing&&!this.isDeleteTool&&!this.dimensions.active&&!this.interaction&&!this.polyline&&!this.threePointArc&&!this.space
       ?paper.view.projectToView(bounds.bottomCenter).add([0,28]):null;
   }
-  duplicateSelection():void {
+  duplicateSelection():void {this.requireSelectionAccess();
     this.cancel();
     const sources=this.selection.filter(item=>this.isEditable(item));
     if(!sources.length)return;
-    const before=this.snapshot();
+    admitCopies(this,sources);const before=this.mutationSnapshot();
     this.selection=sources.map(source=>{
       const copy=source.clone({insert:false}) as Shape;
       copy.data={...structuredClone(source.data),uid:crypto.randomUUID()};
@@ -678,9 +722,9 @@ export class CADEditor {
     this.commit(before);
   }
   addShape(item:Shape, name:string):void {
-    const layer=item.data.role==='cutline'?this.cutlines:this.drawingLayer();
+    if(this.hasPendingGesture)this.cancel();const layer=item.data.role==='cutline'?this.cutlines:this.drawingLayer();
     if(layer.data.deleted||!layer.visible||layer.locked)throw new Error('Show and unlock the destination layer before adding an object.');
-    const before=this.snapshot();
+    adoptDetachedArcFrame(item);admitCopies(this,[item]);const before=this.mutationSnapshot();
     // Read first so Paper resolves any lazily stored color string before clearing it.
     if(item.fillColor&&!item.data.text&&item.data.rasterTrace?.mode!=='fill')item.fillColor=null;
     item.data={...item.data,uid:crypto.randomUUID(),role:layerRole(layer),name};
@@ -701,7 +745,7 @@ export class CADEditor {
         for(const path of pathsOf(item))for(const segment of path.segments)if(![segment.point.x,segment.point.y,segment.handleIn.x,segment.handleIn.y,segment.handleOut.x,segment.handleOut.y].every(validNumber))throw new Error('Generated geometry exceeds the supported coordinate range.');
       }
     }catch(error){items.filter(item=>!item.isInserted()).forEach(item=>item.remove());throw error;}
-    this.cancel();const before=this.snapshot();
+    this.cancel();const before=this.mutationSnapshot();
     try{
       const created=sheets.map(sheet=>{
         let name=sheet.name,index=2;while(this.documentLayers.some(layer=>layer.name===name))name=`${sheet.name} ${index++}`;
@@ -709,43 +753,46 @@ export class CADEditor {
         for(const item of sheet.items){item.data={...item.data,uid:crypto.randomUUID(),role:'artwork',name:item.data.name??name};this.insertDrawing(item,layer);}return layer;
       });
       this.selection=[...created[0].children] as Shape[];this.commit(before);
-    }catch(error){items.forEach(item=>item.remove());this.restore(before);throw error;}
+    }catch(error){items.forEach(item=>item.remove());if(this.checkpoints.has(before))this.rollbackMutation(before);throw error;}
   }
   addGeneratedShapes(items:{shape:Shape;name:string;operation?:'engrave'}[]):void {
-    if(!items.length)return;
-    const active=this.drawingLayer();
+    if(!items.length)return;if(this.hasPendingGesture)this.cancel();
+    admitCopies(this,items.map(item=>item.shape));const active=this.drawingLayer();
     const targets=items.map(item=>item.operation==='engrave'?this.documentLayers.find(layer=>layerRole(layer)==='engrave'):active);
     if(targets.some(layer=>!layer||!layer.visible||layer.locked))throw new Error('Show and unlock Engrave Path before inserting fold lines.');
-    const before=this.snapshot();
+    const before=this.mutationSnapshot();
     items.forEach(({shape,name},index)=>{const layer=targets[index]!;shape.data={uid:crypto.randomUUID(),role:layerRole(layer),name};this.insertDrawing(shape,layer);});
     this.selection=items.map(item=>item.shape);this.commit(before);
   }
   addTracedShapes(items:Shape[],name:string):void {
-    if(!items.length)return;
-    const colour=items.every(item=>item.data.rasterTrace?.mode==='colour'),layer=colour?this.artwork:this.drawingLayer();
+    if(!items.length)return;if(this.hasPendingGesture)this.cancel();
+    admitCopies(this,items);const colour=items.every(item=>item.data.rasterTrace?.mode==='colour'),layer=colour?this.artwork:this.drawingLayer();
     if(layer.data.deleted||!layer.visible||layer.locked)throw new Error('Show and unlock Artwork before inserting colour vectors.');
     if(colour){if(this.objects.length+items.length>MAX_DOCUMENT_OBJECTS)throw new Error('These colour vectors would exceed the document object limit. Use fewer colours, more cleanup or a new document.');validateGeometryInput([...this.objects,...items]);}
-    const before=this.snapshot();
+    const before=this.mutationSnapshot();
     items.forEach((item,index)=>{item.data={...item.data,uid:crypto.randomUUID(),role:layerRole(layer),name:items.length>1?`${name} · Path ${index+1}`:name};this.insertDrawing(item,layer);});
     this.selection=items;this.commit(before);
   }
   get canMoveSelectionToCutPath():boolean {return this.canMoveSelectionToLayer('cutline');}
   moveSelectionToCutPath():number {return this.moveSelectionToLayer('cutline');}
-  outline(distance:number):void {if(!this.canOutlineSelection||!this.selected)throw new Error('Select a closed shape first.');if(!this.cutlines.visible||this.cutlines.locked)throw new Error('Show and unlock Cut Path before creating an outline.');const result=createStickerOutline(this.selected,distance);this.addShape(result,'Sticker outline');this.setTool('select');}
-  setProperty(key:'x'|'y'|'width'|'height',value:number):void {
+  outline(distance:number):void {this.requireSelectionAccess();if(this.hasPendingGesture||this.textEditing)throw new Error('Finish or cancel the current edit before creating an outline.');if(!this.canOutlineSelection||!this.selected)throw new Error('Select a closed shape first.');if(!this.cutlines.visible||this.cutlines.locked)throw new Error('Show and unlock Cut Path before creating an outline.');const result=createStickerOutline(this.selected,distance);this.addShape(result,'Sticker outline');this.setTool('select');}
+  setProperty(key:'x'|'y'|'width'|'height',value:number):void {this.requireSelectionAccess();
+    if(this.hasPendingGesture||this.textEditing)throw new Error('Finish or cancel the current edit before changing properties.');
     if(!this.selection.length)return;
     if(!validNumber(value) || ((key==='width'||key==='height')&&!validDimension(value))) throw new Error('Enter a finite position or a dimension of at least 0.001 mm, within ±1,000,000 mm.');
-    const before=this.snapshot(), original=this.selectionBounds!,bounds=original.clone();
+    const before=this.mutationSnapshot(), original=this.selectionBounds!,bounds=original.clone();
     if((key==='width'||key==='height')&&original[key]<MIN_DIMENSION_MM)throw new Error('Drag a line endpoint to change its direction.');
     bounds[key]=value;
-    if(this.selectedArc&&(key==='width'||key==='height')){const scale=value/original[key];bounds.width=original.width*scale;bounds.height=original.height*scale;}
+    let uniformScale:number|undefined;
+    if(this.selectedArc&&(key==='width'||key==='height')){uniformScale=value/original[key];bounds.width=original.width*uniformScale;bounds.height=original.height*uniformScale;}
     if(![bounds.left,bounds.top,bounds.right,bounds.bottom].every(validNumber)) throw new Error('The resulting bounds exceed ±1,000,000 mm.');
-    this.transformSelection(this.selection,original,bounds);this.commit(before);
+    this.transformSelection(this.selection,original,bounds,uniformScale);this.commit(before);
   }
-  setPreciseProperty(key:PreciseProperty,value:number):void {
-    const source=this.selected,geometry=preciseGeometry(source);
+  setPreciseProperty(key:PreciseProperty,value:number):void {this.requireSelectionAccess();
+    const source=this.selected;if(source?.data.arc!==undefined)assertCircularIdentity(source);const geometry=preciseGeometry(source);
     if(!(source instanceof paper.Path)||!geometry||!this.canFlipSelection)return;
-    const copy=editedPreciseShape(source,geometry,key,value),before=this.snapshot();
+    if(geometry.kind==='arc'&&key!=='x'&&key!=='y')throw new Error('Use the dedicated Arc controls to preserve its circular parameters.');
+    const copy=editedPreciseShape(source,geometry,key,value),before=this.mutationSnapshot();
     this.replaceItems([source],[copy]);this.commit(before);
   }
   get lineAppearanceItems():readonly Shape[] {return this.selection.filter(item=>!item.data.text&&!item.data.dimension&&this.isEditable(item));}
@@ -753,17 +800,17 @@ export class CADEditor {
   private ensureLineColour(item:Shape):void {
     if(!item.strokeColor)item.strokeColor=new paper.Color(layerRole(item.layer)==='artwork'&&item.data.customColour?item.data.customColour:layerColour(item.layer));
   }
-  setLineWeight(weight:number):void {
+  setLineWeight(weight:number):void {this.requireSelectionAccess();
     if(!validLineWeight(weight))throw new Error('Enter a line weight between 0.001 and 1000 mm.');
     if(!this.canEditLineAppearance)return;
-    const before=this.snapshot();
+    const before=this.mutationSnapshot();
     for(const item of this.lineAppearanceItems){this.ensureLineColour(item);applyLineWeight(item,weight);}
     this.commit(before);
   }
-  setLineDesign(design:LineDesign):void {
+  setLineDesign(design:LineDesign):void {this.requireSelectionAccess();
     if(!LINE_DESIGNS.includes(design))throw new Error('Choose Solid, Dashed, Dotted or Dash-dot.');
     if(!this.canEditLineAppearance)return;
-    const before=this.snapshot();
+    const before=this.mutationSnapshot();
     for(const item of this.lineAppearanceItems){this.ensureLineColour(item);applyLineDesign(item,design);}
     this.commit(before);
   }
@@ -771,7 +818,7 @@ export class CADEditor {
   get canFlipSelection():boolean {
     return !this.textEditing&&!this.nodes.dragging&&!this.dimensions.active&&!this.interaction&&!this.polyline&&!this.threePointArc&&this.selection.length>0&&this.selection.every(item=>this.isEditable(item));
   }
-  flipSelection(axis:'horizontal'|'vertical'):void {
+  flipSelection(axis:'horizontal'|'vertical'):void {this.requireSelectionAccess();
     if(!this.canFlipSelection)return;
     const horizontal=axis==='horizontal',pivot=this.selectionBounds!.center;
     const matrix=new paper.Matrix().scale(horizontal?-1:1,horizontal?1:-1,pivot),copies:Shape[]=[];
@@ -781,12 +828,12 @@ export class CADEditor {
         copy.data.rotationDegrees=this.normalizedRotation((horizontal?180:0)-(source.data.rotationDegrees??0));
         if(source.data.arc){
           const arc=source.data.arc as ArcGeometry,center=matrix.transform(new paper.Point(arc.cx,arc.cy));
-          copy.data.arc={...arc,cx:center.x,cy:center.y,start:this.normalizedRotation((horizontal?180:0)-arc.start),sweep:-arc.sweep};
+          copy.data.arc={...arc,cx:center.x,cy:center.y,start:this.normalizedRotation((horizontal?180:0)-normalizedArcAngle(arc.start)),sweep:-arc.sweep};
         }
         if(![copy.bounds.left,copy.bounds.top,copy.bounds.right,copy.bounds.bottom].every(validNumber))throw new Error('Flip would exceed the document coordinate limits.');
       }
     }catch(error){copies.forEach(copy=>copy.remove());throw error;}
-    const before=this.snapshot();this.replaceItems(this.selection,copies);this.commit(before);
+    const before=this.mutationSnapshot();this.replaceItems(this.selection,copies);this.commit(before);
   }
   private rotatedCopies(items:readonly Shape[],degrees:number,pivot:paper.Point):Shape[] {
     const copies:Shape[]=[];
@@ -795,7 +842,7 @@ export class CADEditor {
         const copy=source.clone({insert:false}) as Shape;copies.push(copy);copy.rotate(degrees,pivot);
         transformText(copy,new paper.Matrix().rotate(degrees,pivot));
         copy.data.rotationDegrees=this.normalizedRotation((source.data.rotationDegrees??0)+degrees);
-        if(source.data.arc){const arc=source.data.arc as ArcGeometry,center=new paper.Point(arc.cx,arc.cy).rotate(degrees,pivot);copy.data.arc={...arc,cx:center.x,cy:center.y,start:this.normalizedRotation(arc.start+degrees)};}
+        if(source.data.arc){const arc=source.data.arc as ArcGeometry,center=new paper.Point(arc.cx,arc.cy).rotate(degrees,pivot);copy.data.arc={...arc,cx:center.x,cy:center.y,start:this.normalizedRotation(normalizedArcAngle(arc.start)+degrees)};}
         if(![copy.bounds.left,copy.bounds.top,copy.bounds.right,copy.bounds.bottom].every(validNumber))throw new Error('Rotation would exceed the document coordinate limits.');
       }
       return copies;
@@ -804,20 +851,22 @@ export class CADEditor {
   private replaceItems(items:readonly Shape[],copies:Shape[]):void {
     items.forEach((item,i)=>{item.parent.insertChild(item.index,copies[i]);item.remove();});this.selection=copies;
   }
-  setRotation(value:number):void {
+  setRotation(value:number):void {this.requireSelectionAccess();
     if(!this.selection.length)return;
     if(!Number.isFinite(value))throw new Error('Enter a finite rotation angle in degrees.');
     const degrees=this.selection.length===1?this.normalizedRotation(value)-this.selectionRotation:value%360;
     if(Math.abs(degrees)<1e-10)return;
     const arc=this.selectedArc,pivot=arc?new paper.Point(arc.cx,arc.cy):this.selectionBounds!.center;
-    const copies=this.rotatedCopies(this.selection,degrees,pivot),before=this.snapshot();
+    const copies=this.rotatedCopies(this.selection,degrees,pivot),before=this.mutationSnapshot();
     this.replaceItems(this.selection,copies);this.commit(before);
   }
-  setArcProperty(key:'radius'|'start'|'sweep',value:number):void {
-    const arc=this.selectedArc,item=this.selected;if(!arc||!(item instanceof paper.Path))return;
-    const before=this.snapshot(),next={...arc,[key]:value};
+  setArcProperty(key:'radius'|'start'|'sweep',value:number):void {this.requireSelectionAccess();
+    if(this.hasPendingGesture||this.textEditing)throw new Error('Finish or cancel the current edit before changing arc properties.');
+    if(!['radius','start','sweep'].includes(key))throw new Error('Choose Radius, Start or Sweep for an arc.');
+    const item=this.selected;if(!item?.data.arc||!(item instanceof paper.Path))return;assertCircularIdentity(item);const arc=item.data.arc as ArcGeometry;
+    const before=this.mutationSnapshot(),next={...arc,[key]:value};
     if(key==='start')next.start=((value%360)+360)%360;
-    updateCircularArc(item,next);if(key==='start')item.data.rotationDegrees=this.normalizedRotation((item.data.rotationDegrees??0)+next.start-arc.start);this.commit(before);
+    updateCircularArc(item,next);if(key==='start')item.data.rotationDegrees=this.normalizedRotation((item.data.rotationDegrees??0)+next.start-normalizedArcAngle(arc.start));this.commit(before);
   }
   private resize():void {
     const center=paper.view.center.clone(),r=this.canvas.parentElement!.getBoundingClientRect();
@@ -825,8 +874,9 @@ export class CADEditor {
   }
   private screen(event:PointerEvent|WheelEvent):paper.Point {const r=this.canvas.getBoundingClientRect();return new paper.Point(event.clientX-r.left,event.clientY-r.top);}
   private handlePoints():paper.Point[] {
+    if(!this.selection.every(item=>this.isEditable(item)))return [];
     const arc=this.selectedArc;
-    if(arc)return [new paper.Point(arc.cx,arc.cy),arcPoint(arc,arc.start),arcPoint(arc,arc.start+arc.sweep),arcPoint(arc,arc.start+arc.sweep/2)];
+    if(arc)return [new paper.Point(arc.cx,arc.cy),arcPoint(arc,arc.start),arcPoint(arc,normalizedArcAngle(arc.start)+arc.sweep),arcPoint(arc,normalizedArcAngle(arc.start)+arc.sweep/2)];
     if(this.hasEndpointHandles){const path=this.selected as paper.Path;return path.segments.map(segment=>path.localToGlobal(segment.point));}
     const b=this.selectionBounds;if(!b)return [];
     return this.boxHandlePoints(b);
@@ -844,7 +894,7 @@ export class CADEditor {
     }
   }
   private rotationControl():{anchor:paper.Point;point:paper.Point}|null {
-    const bounds=this.selectionBounds;if(!bounds||this.selectedArc)return null;
+    const bounds=this.selectionBounds;if(!bounds||this.selectedArc||!this.selection.every(item=>this.isEditable(item)))return null;
     const anchor=bounds.topCenter;
     return {anchor,point:anchor.subtract(new paper.Point(0,this.rotationHandleOffset/paper.view.zoom))};
   }
@@ -886,7 +936,7 @@ export class CADEditor {
       const [from,to]=this.threePointArc.points,arc=this.threePointArc.item.data.arc as ArcGeometry|undefined;
       const guide=new paper.Path({segments:[from,to],insert:false,strokeColor:this.selectionColor,strokeWidth:1/paper.view.zoom,dashArray:[4/paper.view.zoom,4/paper.view.zoom]});
       guide.data.role='overlay';this.overlays.addChild(guide);
-      if(arc){const label=new paper.PointText({point:arcPoint(arc,arc.start+arc.sweep/2).add([12/paper.view.zoom,-12/paper.view.zoom]),content:`${Number(Math.abs(arc.sweep).toFixed(1))}°`,insert:false,fontSize:11/paper.view.zoom,fillColor:this.selectionColor});label.data.role='overlay';this.overlays.addChild(label);}
+      if(arc){const label=new paper.PointText({point:arcPoint(arc,normalizedArcAngle(arc.start)+arc.sweep/2).add([12/paper.view.zoom,-12/paper.view.zoom]),content:`${Number(Math.abs(arc.sweep).toFixed(1))}°`,insert:false,fontSize:11/paper.view.zoom,fillColor:this.selectionColor});label.data.role='overlay';this.overlays.addChild(label);}
     }
     const state=this.interaction;
     if(state?.kind==='marquee'&&state.bounds){
@@ -896,6 +946,7 @@ export class CADEditor {
     this.drawSnapMarker();
     const bounds=this.selectionBounds;
     if(this.isDeleteTool)return;
+    if(!this.selection.every(item=>this.isEditable(item)))return;
     if(!bounds||state?.kind==='draw'||this.polyline||this.threePointArc)return;
     const duplicatePoint=this.duplicateControlPoint;
     if(duplicatePoint){
@@ -920,7 +971,7 @@ export class CADEditor {
     for(const item of [marker,label]){item.data.role='overlay';item.data.snapMode=snap.mode;this.overlays.addChild(item);}
   }
   private drawArcControls(arc:ArcGeometry):void {
-    const center=new paper.Point(arc.cx,arc.cy),points=[center,arcPoint(arc,arc.start),arcPoint(arc,arc.start+arc.sweep),arcPoint(arc,arc.start+arc.sweep/2)];
+    const center=new paper.Point(arc.cx,arc.cy),points=[center,arcPoint(arc,arc.start),arcPoint(arc,normalizedArcAngle(arc.start)+arc.sweep),arcPoint(arc,normalizedArcAngle(arc.start)+arc.sweep/2)];
     const guide=new paper.Path({segments:[points[1],center,points[2]],insert:false,strokeColor:this.selectionColor,strokeWidth:1/paper.view.zoom,dashArray:[4/paper.view.zoom,4/paper.view.zoom],opacity:0.45});guide.data.role='overlay';this.overlays.addChild(guide);
     points.forEach((point,index)=>{
       const size=9/paper.view.zoom;
@@ -945,19 +996,20 @@ export class CADEditor {
     else if(this.tool==='arc-three-point'||this.tool==='arc-endpoints'){this.addThreePointArcPoint(point,event.shiftKey);return;}
     else if(this.tool==='polyline'){this.addPolylinePoint(point,event.shiftKey);return;}
     else if(this.tool!=='select') {
-      const before=this.snapshot();this.selected=null;this.interaction={...base,before,start:this.tool==='freehand'?point:this.snapPoint(point,base.snapSpacing),kind:'draw'};
+      const before=this.mutationSnapshot();this.selected=null;this.interaction={...base,before,start:this.tool==='freehand'?point:this.snapPoint(point,base.snapSpacing),kind:'draw'};
     } else {
       const rotationHandle=this.rotationHandlePoint();
       const handle=this.handlePoints().findIndex(p=>p.getDistance(point)<=9/paper.view.zoom);
       if(rotationHandle&&rotationHandle.getDistance(point)<=9/paper.view.zoom){
-        this.interaction={...base,before:this.snapshot(),kind:'rotate',rotationPivot:this.selectionBounds!.center,rotationDelta:0,items:[...this.selection],bounds:this.selectionBounds!,originals:this.selection.map(item=>item.clone({insert:false}) as Shape)};
+        this.interaction={...base,before:this.mutationSnapshot(),kind:'rotate',rotationPivot:this.selectionBounds!.center,rotationDelta:0,items:[...this.selection],bounds:this.selectionBounds!,originals:this.selection.map(item=>item.clone({insert:false}) as Shape)};
       }else if(handle>=0 && this.selection.length) {
-        this.interaction={...base,before:this.snapshot(),kind:this.selectedArc?'arc-handle':this.hasEndpointHandles?'endpoint':'resize',arcGeometry:this.selectedArc?{...this.selectedArc}:undefined,items:[...this.selection],bounds:this.selectionBounds!,handle,originals:this.selection.map(item=>item.clone({insert:false}) as Shape)};
+        this.interaction={...base,before:this.mutationSnapshot(),kind:this.selectedArc?'arc-handle':this.hasEndpointHandles?'endpoint':'resize',arcGeometry:this.selectedArc?{...this.selectedArc}:undefined,items:[...this.selection],bounds:this.selectionBounds!,handle,originals:this.selection.map(item=>item.clone({insert:false}) as Shape)};
       } else {
         const hit=this.hitObject(point);
         if(hit){
           if(event.shiftKey){this.select(hit,true);return;}
           if(!this.selection.includes(hit))this.selected=hit;
+          if(!this.selection.every(item=>this.isEditable(item))){this.onMessage(new EntityAccessError().message,true);return;}
           this.interaction={...base,cancelSelection:[...this.selection],kind:'move',items:[...this.selection],positions:this.selection.map(item=>item.position.clone()),bounds:this.selectionBounds!};
         }else{
           const initialSelection=event.shiftKey?[...this.selection]:[];
@@ -985,13 +1037,17 @@ export class CADEditor {
       return;
     }
     if(state.id!==event.pointerId)return;event.preventDefault();
+    if(state.items&&!state.items.every(item=>this.isEditable(item))){
+      this.interaction=null;this.activeObjectSnap=null;state.originals?.forEach(item=>item.remove());if(state.before)this.rollbackMutation(state.before,true);
+      if(this.canvas.hasPointerCapture(event.pointerId))this.canvas.releasePointerCapture(event.pointerId);this.onMessage(new EntityAccessError().message,true);this.updateCursor();this.changed();return;
+    }
     const screen=this.screen(event),point=paper.view.viewToProject(screen);
     if(state.kind==='draw'||state.kind==='move'||state.kind==='resize'||state.kind==='marquee'||state.kind==='endpoint'||state.kind==='arc-handle'||state.kind==='rotate'){
       state.hasDragged ||= screen.getDistance(state.screen)>=2;
       if(!state.hasDragged)return;
     }
     // A click, pan or marquee changes no document geometry and needs no full history.
-    if(state.kind==='move'&&!state.before)state.before={...this.snapshot(),activeLayerId:state.cancelLayer};
+    if(state.kind==='move'&&!state.before){state.before=this.mutationSnapshot();state.before.activeLayerId=state.cancelLayer;}
     if(state.kind==='pan')paper.view.center=state.center.subtract(screen.subtract(state.screen).divide(paper.view.zoom));
     if(state.kind==='draw'){
       if(this.tool==='freehand'){
@@ -1029,9 +1085,9 @@ export class CADEditor {
       else if(delta.length>=MIN_DIMENSION_MM){
         if(state.handle===3)arc.radius=Math.max(MIN_DIMENSION_MM,state.snapSpacing===null?delta.length:snapMM(delta.length,state.snapSpacing));
         else if(state.handle===1)arc.start=snapArcAngle(delta.angle,event.shiftKey);
-        else {const sign=Math.sign(arc.sweep),angle=((sign*(delta.angle-arc.start)%360)+360)%360;arc.sweep=sign*Math.max(1,Math.min(359,snapArcAngle(angle,event.shiftKey)));}
+        else {const sign=Math.sign(arc.sweep),angle=((sign*(delta.angle-normalizedArcAngle(arc.start))%360)+360)%360;arc.sweep=sign*Math.max(1,Math.min(359,snapArcAngle(angle,event.shiftKey)));}
       }
-      try{updateCircularArc(state.items[0] as paper.Path,arc);if(state.handle===1)state.items[0].data.rotationDegrees=this.normalizedRotation((state.originals?.[0].data.rotationDegrees??0)+arc.start-state.arcGeometry.start);}catch{/* Keep the last valid geometry when a handle crosses document limits. */}
+      try{updateCircularArc(state.items[0] as paper.Path,arc);delete state.arcInvalid;if(state.handle===1)state.items[0].data.rotationDegrees=this.normalizedRotation((state.originals?.[0].data.rotationDegrees??0)+normalizedArcAngle(arc.start)-normalizedArcAngle(state.arcGeometry.start));}catch(error){state.arcInvalid=(error as Error).message;/* Keep the last valid preview, but never commit it as the refused final request. */}
     }
     if(state.kind==='endpoint'&&state.items){
       const item=state.items[0] as paper.Path,anchor=item.localToGlobal(item.segments[1-state.handle!].point);
@@ -1044,9 +1100,10 @@ export class CADEditor {
       const target=this.snapPoint(handle.add(point.subtract(state.start)),state.snapSpacing,undefined,!event.shiftKey&&h%2===0);
       const minimum=this.activeObjectSnap?MIN_DIMENSION_MM:state.snapSpacing??MIN_DIMENSION_MM;
       const horizontal=h!==1&&h!==5&&b.width>=MIN_DIMENSION_MM,vertical=h!==3&&h!==7&&b.height>=MIN_DIMENSION_MM;
+      let uniformScale:number|undefined;
       let width=horizontal?Math.max(minimum,Math.abs(target.x-anchor.x)):b.width;
       let height=vertical?Math.max(minimum,Math.abs(target.y-anchor.y)):b.height;
-      if(event.shiftKey&&(horizontal||vertical)) {const scale=horizontal&&vertical?Math.max(width/b.width,height/b.height):horizontal?width/b.width:height/b.height;width=b.width*scale;height=b.height*scale;}
+      if(event.shiftKey&&(horizontal||vertical)) {const scale=horizontal&&vertical?Math.max(width/b.width,height/b.height):horizontal?width/b.width:height/b.height;uniformScale=scale;width=b.width*scale;height=b.height*scale;}
       const left=[0,6,7].includes(h),top=[0,1,2].includes(h);
       const x=horizontal?(left?anchor.x-width:anchor.x):b.center.x-width/2;
       const y=vertical?(top?anchor.y-height:anchor.y):b.center.y-height/2;
@@ -1055,18 +1112,20 @@ export class CADEditor {
         const replacement=state.originals![i].clone({insert:false}) as Shape;
         item.parent.insertChild(item.index,replacement);item.remove();return replacement;
       });
-      this.transformSelection(state.items,b,new paper.Rectangle(x,y,width,height));this.selection=state.items;
+      this.transformSelection(state.items,b,new paper.Rectangle(x,y,width,height),uniformScale);this.selection=state.items;
     }
     this.changed();
   };
-  private transformSelection(items:Shape[],from:paper.Rectangle,to:paper.Rectangle):void {
-    const sx=from.width>=MIN_DIMENSION_MM?to.width/from.width:1,sy=from.height>=MIN_DIMENSION_MM?to.height/from.height:1;
+  private transformSelection(items:Shape[],from:paper.Rectangle,to:paper.Rectangle,uniformScale?:number):void {
+    // Preserve explicit uniform intent with one scalar, rather than guessing
+    // circular semantics from an epsilon on independently computed scale factors.
+    const sx=uniformScale??(from.width>=MIN_DIMENSION_MM?to.width/from.width:1),sy=uniformScale??(from.height>=MIN_DIMENSION_MM?to.height/from.height:1);
     for(const item of items){
       const arc=item.data.arc as ArcGeometry|undefined;
       item.scale(sx,sy,from.topLeft);transformText(item,new paper.Matrix().scale(sx,sy,from.topLeft));
       const delta=to.topLeft.subtract(from.topLeft);item.translate(delta);transformText(item,new paper.Matrix().translate(delta));
       if(arc){
-        if(Math.abs(sx-sy)<1e-9)item.data.arc={...arc,cx:to.x+(arc.cx-from.x)*sx,cy:to.y+(arc.cy-from.y)*sy,radius:arc.radius*sx};
+        if(sx===sy)item.data.arc={...arc,cx:to.x+(arc.cx-from.x)*sx,cy:to.y+(arc.cy-from.y)*sy,radius:arc.radius*sx};
         else delete item.data.arc; // A nonuniform group transform intentionally converts the arc to a freeform path.
       }
     }
@@ -1085,7 +1144,7 @@ export class CADEditor {
     try{
       plan=createDeletePlan(this.tool==='dissect-delete'?this.objects.filter(item=>!item.data.dimension):this.objects,point,6/paper.view.zoom,this.tool as 'dissect-delete'|'line-delete');
       if(!plan){this.changed();return;}
-      const before=this.snapshot(),owner=plan.owner;
+      const owner=plan.owner;requireEditable([owner]);const before=this.mutationSnapshot();
       let replacement:Shape|null=null;
       if(plan.remaining?.length){
         replacement=plan.remaining.length===1?plan.remaining[0]:new paper.CompoundPath({children:plan.remaining,insert:false});
@@ -1104,7 +1163,7 @@ export class CADEditor {
     if(angleStep)this.activeObjectSnap=null;
     if(!validNumber(end.x)||!validNumber(end.y)){this.onMessage('Arc points must be within the document coordinate limits.',true);return;}
     if(!this.threePointArc){
-      const before=this.snapshot(),item=new paper.Path({insert:false});this.overlays.addChild(item);
+      const before=this.mutationSnapshot(),item=new paper.Path({insert:false});this.overlays.addChild(item);
       this.threePointArc={points:[end],item,before,spacing};this.selected=null;this.previewThreePointArc();return;
     }
     const state=this.threePointArc;
@@ -1135,7 +1194,7 @@ export class CADEditor {
   }
   private addPolylinePoint(point:paper.Point,shift:boolean):void {
     if(!this.polyline){
-      const before=this.snapshot(),spacing=this.gridSnappingActive?this.grid.spacingMM:null;
+      const before=this.mutationSnapshot(),spacing=this.gridSnappingActive?this.grid.spacingMM:null;
       const item=new paper.Path({insert:false,closed:false,strokeColor:this.drawingColor,strokeWidth:1.5,strokeScaling:false,fillColor:null});
       this.overlays.addChild(item);this.polyline={points:[this.snapPoint(point,spacing)],item,before,spacing};this.selected=null;
     }else{
@@ -1211,13 +1270,16 @@ export class CADEditor {
   private pointerUp=(event:PointerEvent):void=>{
     if(this.nodes.dragging){this.nodes.up(event,paper.view.viewToProject(this.screen(event)));return;}
     const state=this.interaction;if(!state||event.pointerId!==state.id)return;
-    this.pointerMove(event);if(state.kind==='draw'&&this.tool==='freehand')this.finishFreehand(state,event);this.interaction=null;this.activeObjectSnap=null;state.originals?.forEach(item=>item.remove());
+    this.pointerMove(event);if(this.interaction!==state)return;if(state.kind==='draw'&&this.tool==='freehand')this.finishFreehand(state,event);this.interaction=null;this.activeObjectSnap=null;state.originals?.forEach(item=>item.remove());
+    let drawAccepted=state.kind!=='draw';
+    if(state.kind==='arc-handle'&&state.arcInvalid&&state.before){this.rollbackMutation(state.before);this.onMessage(state.arcInvalid,true);drawAccepted=false;}
     if(state.kind==='draw' && state.item) {
       if(this.tool==='line'||this.tool==='freehand'?(state.item as paper.Path).length<MIN_DIMENSION_MM:state.item.bounds.width<MIN_DIMENSION_MM||state.item.bounds.height<MIN_DIMENSION_MM)state.item.remove();
-      else {state.item.data={...state.item.data,role:'artwork',uid:crypto.randomUUID(),name:this.tool[0].toUpperCase()+this.tool.slice(1),...(this.tool==='polygon'?{sides:this.polygonSides}:{})};this.insertDrawing(state.item);this.selected=state.item;if(this.tool==='arc')this.tool='select';}
+      else {state.item.data={...state.item.data,role:'artwork',uid:crypto.randomUUID(),name:this.tool[0].toUpperCase()+this.tool.slice(1),...(this.tool==='polygon'?{sides:this.polygonSides}:{})};this.insertDrawing(state.item);this.selected=state.item;drawAccepted=true;if(this.tool==='arc')this.tool='select';}
     }
-    const committed=state.kind!=='pan'&&state.kind!=='marquee'&&state.hasDragged&&state.before;
-    if(committed)this.commit(state.before!);
+    if(state.kind==='draw'&&state.hasDragged&&!drawAccepted&&state.before){this.rollbackMutation(state.before);this.onMessage('The shape could not be added at this size or position.','warning');}
+    const committed=drawAccepted&&state.kind!=='pan'&&state.kind!=='marquee'&&state.hasDragged&&state.before;
+    if(committed){try{this.commit(state.before!);}catch(error){this.onMessage((error as Error).message,true);}}
     if(this.canvas.hasPointerCapture(event.pointerId))this.canvas.releasePointerCapture(event.pointerId);
     this.updateCursor();if(!committed)this.changed();
   };
@@ -1227,11 +1289,11 @@ export class CADEditor {
     this.offsets?.cancel();this.patterns?.cancel();this.dimensions.cancel();this.nodes.cancel();
     this.activeObjectSnap=null;this.clearDeletePreview();
     const arc=this.threePointArc;this.threePointArc=null;
-    if(arc){arc.item.remove();this.restore(arc.before);}
+    if(arc){arc.item.remove();this.rollbackMutation(arc.before);this.onDocumentChange(this.snapshot());}
     const polyline=this.polyline;this.polyline=null;
-    if(polyline){polyline.item.remove();this.restore(polyline.before);}
+    if(polyline){polyline.item.remove();this.rollbackMutation(polyline.before);this.onDocumentChange(this.snapshot());}
     const state=this.interaction;this.interaction=null;
-    if(state){state.originals?.forEach(item=>item.remove());if(state.kind==='draw')state.item?.remove();if(state.kind==='pan')paper.view.center=state.center;else if(state.before)this.restore(state.before);else{this.selection=state.cancelSelection;this.drawingLayerId=state.cancelLayer;this.layerSelectionSignature=this.selectionSignature();}if(this.canvas.hasPointerCapture(state.id))this.canvas.releasePointerCapture(state.id);}
+    if(state){state.originals?.forEach(item=>item.remove());if(state.kind==='draw')state.item?.remove();if(state.kind==='pan')paper.view.center=state.center;else if(state.before){this.rollbackMutation(state.before,true);this.onDocumentChange(this.snapshot());}else{this.selection=state.cancelSelection;this.drawingLayerId=state.cancelLayer;this.layerSelectionSignature=this.selectionSignature();}if(this.canvas.hasPointerCapture(state.id))this.canvas.releasePointerCapture(state.id);}
     this.updateCursor();this.changed();
   }
   private wheel=(event:WheelEvent):void=>{

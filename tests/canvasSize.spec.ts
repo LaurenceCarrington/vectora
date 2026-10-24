@@ -32,6 +32,9 @@ test('New-document setup fits both themes and narrow windows',async({page})=>{
 test('A damaged recovered text draft preserves valid sized document tabs',async({page})=>{
  await page.goto(DEV);await create(page,'A4');
  const contents=await page.evaluate(async()=>{const e=(window as any).__vectora,p=(window as any).__paper;e.addShape(new p.Path.Rectangle({insert:false,rectangle:[10,20,40,30]}),'Keep me');return (await import('/src/documentFormat.ts' as string)).encodeDocument(e);});
- await page.addInitScript(contents=>localStorage.setItem('vectora.recovery.pending',JSON.stringify({version:1,time:Date.now()+100000,id:'draft-fixture',data:{contents,filename:'Keep me.vectora',dirty:true,draft:{content:'Lost draft',sourceId:'missing-object',point:null}}})),contents);
+ const key=await page.evaluate(async()=>(await (await import('/src/storage/recoverySession.ts')).recoveryLocation()).journal);
+ // Inject at next-document startup, as in the original regression. Injecting
+ // before reload would let the real outgoing page's final save replace it.
+ await page.addInitScript(({key,contents})=>localStorage.setItem(key,JSON.stringify({version:1,time:Date.now()+100000,id:'draft-fixture',data:{contents,filename:'Keep me.vectora',dirty:true,draft:{content:'Lost draft',sourceId:'missing-object',point:null}}})),{key,contents});
  page.once('dialog',d=>d.accept());await page.reload();await expect(page.locator('#workspace')).not.toHaveAttribute('inert','');await expect(setup(page)).toBeHidden();await expect(page.locator('[data-document-name]')).toHaveText('Keep me.vectora');expect(await page.evaluate(()=>(window as any).__vectora.objects.length)).toBe(1);expect(await page.evaluate(()=>(window as any).__vectora.canvasSize.width)).toBe(210);await expect(page.locator('.toast-warning')).toContainText('recovered text object is missing');
 });

@@ -1,13 +1,14 @@
+import {canExport} from './model/entityAccess';
 import type {Shape,Vertex} from './types';
 import {dimensionLabel,dimensionTextLayout} from './dimensions';
-import {NUMERIC_EPSILON_MM,validNumber} from './units';
+import {validNumber} from './units';
 import {exportContours} from './dxfGeometry';
 import {validateGeometryInput} from './geometry';
 import {MAX_DXF_POINTS} from './processingLimits';
 
 /** Legacy ASCII R12: independent 2D LINEs and optional annotation TEXT. One drawing unit is 1 mm. */
 export function exportLaserDXF(objects:readonly Shape[],includeArtwork:boolean,tolerance?:number):string {
- const exportable=objects.filter(object=>object.data.role==='cutline'||object.data.role==='engrave'||includeArtwork&&object.data.role==='artwork');
+ const exportable=objects.filter(object=>canExport(object,{kind:'dxf',includeArtwork}));
  validateGeometryInput(exportable);let vertices=0;
  const pair=(code:number,value:string|number)=>`${code}\r\n${value}\r\n`;
  const number=(n:number)=>{if(!validNumber(n))throw new Error('DXF geometry exceeds the supported coordinate range.');return String(Number(n.toFixed(8)));};
@@ -25,7 +26,7 @@ export function exportLaserDXF(objects:readonly Shape[],includeArtwork:boolean,t
   const role=object.data.role;if(role!=='cutline'&&role!=='engrave'&&!(includeArtwork&&role==='artwork'))continue;
   const layer=layerName(object),style=pair(8,layer)+pair(6,'CONTINUOUS')+pair(62,layers.get(layer)!);
   const line=(a:Vertex,b:Vertex)=>{
-   if(Math.hypot(a.x-b.x,a.y-b.y)<=NUMERIC_EPSILON_MM)return;
+   if(a.x===b.x&&a.y===b.y)return;
    include(a.x,-a.y);include(b.x,-b.y);
    entities.push(pair(0,'LINE')+style+pair(10,number(a.x))+pair(20,number(-a.y))+pair(30,0)+pair(11,number(b.x))+pair(21,number(-b.y))+pair(31,0));
   };

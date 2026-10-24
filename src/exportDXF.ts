@@ -1,3 +1,4 @@
+import {canExport} from './model/entityAccess';
 import {standardContours,circularBounds,validateDXFTolerance} from './dxfGeometry';
 import {exportLaserDXF} from './exportLaserDXF';
 import {standardDXF,type DXFEntity,type DXFTag} from './dxfDocument';
@@ -11,7 +12,7 @@ export type DXFFormat='standard'|'laser';
 export function exportDXF(objects:readonly Shape[],includeArtwork=false,mode:DXFFormat='standard',tolerance?:number):string {
  validateDXFTolerance(tolerance);
  if(mode==='laser')return exportLaserDXF(objects,includeArtwork,tolerance);
- const exportable=objects.filter(object=>object.data.role==='cutline'||object.data.role==='engrave'||includeArtwork&&object.data.role==='artwork');
+ const exportable=objects.filter(object=>canExport(object,{kind:'dxf',includeArtwork}));
  validateGeometryInput(exportable);let vertices=0;
  const entities:DXFEntity[]=[],layers=new Map<string,number>([['0',7]]),names=new Map<string,string>();
  let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;

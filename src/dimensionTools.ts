@@ -1,14 +1,15 @@
+import {canEdit,canReferenceVisible} from './model/entityAccess';
 import paper from 'paper';
 import type { CADEditor } from './editor';
 import type { DimensionTool, DimensionData } from './dimensions';
-import { circleAt, createDimension, dimensionLabel, DIMENSION_NAMES, isDimensionTool } from './dimensions';
+import { circleReferenceAt, createDimension, dimensionLabel, DIMENSION_NAMES, isDimensionTool } from './dimensions';
 import { pathsOf } from './geometry';
 import { MIN_DIMENSION_MM, validNumber } from './units';
 
 type Hooks={changed:()=>void;snap:(point:paper.Point)=>paper.Point};
 export class DimensionTools {
   private points:paper.Point[]=[];
-  private circle:{center:paper.Point;radius:number}|null=null;
+  private circle:ReturnType<typeof circleReferenceAt>=null;
   private cursor:paper.Point|null=null;
   private pending:DimensionData|null=null;
   private editingUid:string|null=null;
@@ -34,18 +35,19 @@ export class DimensionTools {
   private snap(point:paper.Point):paper.Point{
     if(!this.editor.snappingEnabled)return point;
     let nearest:paper.Point|null=null,distance=8/paper.view.zoom;
-    for(const owner of this.editor.objects)if(owner.layer.visible&&!owner.data.dimension&&!owner.data.text)for(const path of pathsOf(owner))for(const segment of path.segments){
+    for(const owner of this.editor.objects)if(canReferenceVisible(owner)&&!owner.data.dimension&&!owner.data.text)for(const path of pathsOf(owner).filter(canReferenceVisible))for(const segment of path.segments){
       const anchor=path.localToGlobal(segment.point),d=anchor.getDistance(point);if(d<distance){distance=d;nearest=anchor;}
     }
     return nearest??this.hooks.snap(point);
   }
-  move(point:paper.Point):void{if(this.pending)return;this.cursor=this.snap(point);this.hooks.changed();}
+  private validReference():boolean {if(this.circle&&(!this.editor.objects.includes(this.circle.owner)||!canReferenceVisible(this.circle.owner))){this.cancel();this.editor.onMessage('The dimension reference is hidden or unavailable. Choose a visible reference again.','warning');return false;}return true;}
+  move(point:paper.Point):void{if(!this.validReference()||this.pending)return;this.cursor=this.snap(point);this.hooks.changed();}
   down(point:paper.Point):void{
-    const tool=this.editor.tool;if(!isDimensionTool(tool)||this.pending)return;
+    const tool=this.editor.tool;if(!this.validReference()||!isDimensionTool(tool)||this.pending)return;
     const target=this.snap(point);if(!validNumber(target.x)||!validNumber(target.y))return;
     if(tool==='dimension-radial'||tool==='dimension-diameter'){
       if(!this.circle){
-        this.circle=circleAt(this.editor.objects,point,10/paper.view.zoom);
+        this.circle=circleReferenceAt(this.editor.objects,point,10/paper.view.zoom);
         if(!this.circle){this.editor.onMessage('Choose a circle or circular arc for this dimension.','warning');return;}
         this.points=[this.circle.center,this.circle.center.add([this.circle.radius,0])];
       }else{if(target.getDistance(this.circle.center)<MIN_DIMENSION_MM)return;const data=this.data(tool,target);if(data)this.finish(data);}
@@ -78,12 +80,12 @@ export class DimensionTools {
     this.form.style.top=`${Math.max(8,Math.min(point.y+12,bounds.height-this.form.offsetHeight-8))}px`;this.input.focus({preventScroll:true});
   }
   editSelected():void{
-    const source=this.editor.selected;if(source?.data.dimension?.kind!=='leader')return;
+    const source=this.editor.selected;if(source?.data.dimension?.kind!=='leader'||!canEdit(source))return;
     this.cancel();this.editingUid=source.data.uid;this.openForm(structuredClone(source.data.dimension));this.hooks.changed();
   }
   draw():void{
     const add=(item:paper.Item)=>{item.data.role='overlay';this.editor.overlays.addChild(item);};
-    for(const owner of this.editor.objects)if(owner.layer.visible&&owner.visible&&owner.data.dimension&&owner.data.uid!==this.editingUid){const label=dimensionLabel(owner);if(label)add(label);}
+    for(const owner of this.editor.objects)if(canReferenceVisible(owner)&&owner.data.dimension&&owner.data.uid!==this.editingUid){const label=dimensionLabel(owner);if(label)add(label);}
     if(!this.active||!isDimensionTool(this.editor.tool)&&!this.pending)return;
     let data=this.pending;
     if(!data&&this.cursor)data=this.data(this.editor.tool as DimensionTool,this.cursor);
