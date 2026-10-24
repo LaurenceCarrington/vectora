@@ -1,3 +1,4 @@
+import {circularMeasurement} from './geometryCore/circularIdentity';
 import {canReferenceVisible} from './model/entityAccess';
 import {lengthLabel} from './measurementDisplay';
 import {artworkColor} from './shapeStyles';
@@ -65,14 +66,15 @@ export function dimensionLabel(item:Shape):paper.PointText|null {
   const text=new paper.PointText({insert:false,point:layout.position,content:layout.label,fontSize:layout.fontSize,fontFamily:'Arial, sans-serif',fillColor:item.strokeColor??artworkColor(),justification:layout.centered?'center':'left'});
   text.rotate(layout.angle,layout.position);return text;
 }
-/** Pick true circles and circular arcs; ellipses do not have one radius. */
-export function circleReferenceAt(objects:readonly Shape[],point:paper.Point,tolerance:number):{owner:Shape;center:paper.Point;radius:number}|null {
+/** Pick verified circular constructions; locks do not hide visible references. */
+export function circleReferenceAt(objects:readonly Shape[],point:paper.Point,tolerance:number):{owner:Shape;path:paper.Path;center:paper.Point;radius:number}|null {
+  if(![point.x,point.y,tolerance].every(Number.isFinite)||tolerance<0)return null;
   for(const owner of [...objects].reverse())if(canReferenceVisible(owner)&&!owner.data.dimension&&!owner.data.text){
-    if(owner.data.arc){const arc=owner.data.arc;const copy=documentPath(owner as paper.Path),near=copy.getNearestPoint(point);copy.remove();if(near&&near.getDistance(point)<=tolerance)return {owner,center:new paper.Point(arc.cx,arc.cy),radius:arc.radius};}
-    for(const path of pathsOf(owner))if(canReferenceVisible(path)&&path.closed&&path.segments.length>=4){
-      const copy=documentPath(path),center=copy.bounds.center,radius=copy.bounds.width/2;
-      const circular=radius>MIN_DIMENSION_MM&&Math.abs(copy.bounds.height/2-radius)<radius*0.0005&&copy.curves.every(curve=>[0,0.25,0.5,0.75].every(t=>Math.abs(curve.getPointAtTime(t).getDistance(center)-radius)<radius*0.0005));
-      const near=circular?copy.getNearestPoint(point):null;copy.remove();if(near&&near.getDistance(point)<=tolerance)return {owner,center,radius};
+    for(const path of pathsOf(owner))if(canReferenceVisible(path)){
+      const circular=circularMeasurement(path);if(!circular)continue;
+      const copy=documentPath(path);
+      try{const near=copy.getNearestPoint(point);if(near&&near.getDistance(point)<=tolerance)return {owner,path,center:circular.center,radius:circular.radius};}
+      finally{copy.remove();}
     }
   }
   return null;

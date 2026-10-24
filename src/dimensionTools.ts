@@ -1,3 +1,4 @@
+import {circularMeasurement} from './geometryCore/circularIdentity';
 import {canEdit,canReferenceVisible} from './model/entityAccess';
 import paper from 'paper';
 import type { CADEditor } from './editor';
@@ -40,7 +41,18 @@ export class DimensionTools {
     }
     return nearest??this.hooks.snap(point);
   }
-  private validReference():boolean {if(this.circle&&(!this.editor.objects.includes(this.circle.owner)||!canReferenceVisible(this.circle.owner))){this.cancel();this.editor.onMessage('The dimension reference is hidden or unavailable. Choose a visible reference again.','warning');return false;}return true;}
+  private validReference():boolean {
+    if(!this.circle)return true;
+    const {owner,path,center,radius}=this.circle;
+    if(!this.editor.objects.includes(owner)||!canReferenceVisible(owner)||!canReferenceVisible(path)||!pathsOf(owner).includes(path)){
+      this.cancel();this.editor.onMessage('The dimension reference is hidden or unavailable. Choose a visible reference again.','warning');return false;
+    }
+    const current=circularMeasurement(path);
+    if(!current||!current.center.equals(center)||current.radius!==radius){
+      this.cancel();this.editor.onMessage('The dimension reference changed or is no longer circular. Choose a circle or circular arc again.','warning');return false;
+    }
+    return true;
+  }
   move(point:paper.Point):void{if(!this.validReference()||this.pending)return;this.cursor=this.snap(point);this.hooks.changed();}
   down(point:paper.Point):void{
     const tool=this.editor.tool;if(!this.validReference()||!isDimensionTool(tool)||this.pending)return;
@@ -48,7 +60,7 @@ export class DimensionTools {
     if(tool==='dimension-radial'||tool==='dimension-diameter'){
       if(!this.circle){
         this.circle=circleReferenceAt(this.editor.objects,point,10/paper.view.zoom);
-        if(!this.circle){this.editor.onMessage('Choose a circle or circular arc for this dimension.','warning');return;}
+        if(!this.circle){this.editor.onMessage('Choose a circle or circular arc with verified geometry. Ellipses and deformed curves do not have a single circular radius.','warning');return;}
         this.points=[this.circle.center,this.circle.center.add([this.circle.radius,0])];
       }else{if(target.getDistance(this.circle.center)<MIN_DIMENSION_MM)return;const data=this.data(tool,target);if(data)this.finish(data);}
     }else if(this.points.length<2){

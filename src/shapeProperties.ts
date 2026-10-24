@@ -1,5 +1,5 @@
 import paper from 'paper';
-import {assertCircularIdentity} from './geometryCore/circularIdentity';
+import {assertCircularIdentity,circularMeasurement} from './geometryCore/circularIdentity';
 import {documentPath} from './deletion';
 import {MIN_DIMENSION_MM,validNumber} from './units';
 import type {Shape} from './types';
@@ -9,7 +9,9 @@ const normalized=(angle:number)=>((angle%360)+360)%360;
 /** Recognise current geometry, never trust an object's editable name or stale primitive metadata. */
 export function preciseGeometry(item:Shape|null):PreciseGeometry|null {
  if(!(item instanceof paper.Path)||item.data.text||item.data.dimension)return null;
- if(item.data.arc){try{assertCircularIdentity(item);}catch{return null;}const a=item.data.arc;return {kind:'arc',x:a.cx,y:a.cy,radius:a.radius};}
+ if(item.data.arc!==undefined){const circle=circularMeasurement(item);return circle?{kind:'arc',x:circle.center.x,y:circle.center.y,radius:circle.radius}:null;}
+ const circle=circularMeasurement(item);
+ if(circle?.kind==='circle')return {kind:'circle',x:circle.center.x,y:circle.center.y,radius:circle.radius};
  if(item.segments.length>128)return null;
  const path=documentPath(item);
  try{
@@ -18,19 +20,7 @@ export function preciseGeometry(item:Shape|null):PreciseGeometry|null {
    return delta.length>=MIN_DIMENSION_MM?{kind:'line',x:start.x,y:start.y,length:delta.length,angle:normalized(delta.angle)}:null;
   }
   const native=path.toShape(false);
-  if(native){const type=native.type,radius=native.radius as number;native.remove();if(type==='circle')return {kind:'circle',x:path.bounds.center.x,y:path.bounds.center.y,radius};if(type==='rectangle'&&item.data.sides!==4)return null;}
-  // Documents round coordinates to 12 decimals. Paper's strict kappa test can
-  // reject saved small circles, so compare the four anchors and tangents in mm.
-  if(path.closed&&path.segments.length===4&&path.hasHandles()){
-   const centre=path.segments.reduce((sum,s)=>sum.add(s.point),new paper.Point(0,0)).divide(4);
-   const first=path.firstSegment.point.subtract(centre),radius=first.length;
-   const direction=Math.sign(first.cross(path.segments[1].point.subtract(centre)));
-   const tolerance=Math.max(2e-11,radius*1e-10,Math.max(Math.abs(centre.x),Math.abs(centre.y))*Number.EPSILON*16);
-   if(radius>=MIN_DIMENSION_MM-tolerance&&direction&&path.segments.every((s,i)=>{
-    const radial=first.rotate(direction*i*90,new paper.Point(0,0)),tangent=radial.rotate(direction*90,new paper.Point(0,0)).multiply(.5522847498307936);
-    return s.point.getDistance(centre.add(radial))<=tolerance&&s.handleOut.getDistance(tangent)<=tolerance&&s.handleIn.getDistance(tangent.multiply(-1))<=tolerance;
-   }))return {kind:'circle',x:centre.x,y:centre.y,radius};
-  }
+  if(native){const type=native.type;native.remove();if(type==='rectangle'&&item.data.sides!==4)return null;}
   if(!path.closed||path.hasHandles()||path.segments.length<3||path.segments.length>128)return null;
   const points=path.segments.map(s=>s.point),centre=points.reduce((sum,p)=>sum.add(p),new paper.Point(0,0)).divide(points.length);
   const first=points[0].subtract(centre),radius=first.length;if(radius<MIN_DIMENSION_MM)return null;
