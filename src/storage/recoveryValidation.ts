@@ -34,3 +34,24 @@ export function prepareRecovery(data:RecoveryData):PreparedRecovery {
  }else draft=undefined;
  return {data:{contents:active.tab.contents,filename:active.tab.filename,dirty:active.tab.dirty,tabs:tabs.map(t=>t.tab),activeTabId:active.tab.id,...(draft?{draft}: {})},tabs,issues,invalidTabIds:[...invalid].filter(id=>!seen.has(id))};
 }
+
+/** Restore eligibility is separate from storage validity: a deliberately empty
+ * newest record must suppress older drawings, not look corrupt and fall back.
+ * Text drafts count as the object they create/update during actual restoration.
+ * This is a read-only projection; the original recovery bytes remain retained.
+ */
+export function nonemptyRecovery(prepared:PreparedRecovery):PreparedRecovery|null {
+ const {data}=prepared;
+ const tabs=prepared.tabs.filter(({tab})=>{
+  const objects=JSON.parse(tab.contents).layers.flatMap((layer:{objects:unknown[]})=>layer.objects);
+  let count=objects.length;
+  if(tab.id===data.activeTabId&&data.draft){
+   if(data.draft.sourceId&&!data.draft.content.trim())count--;
+   else if(!data.draft.sourceId&&data.draft.content.trim())count++;
+  }
+  return count>0;
+ });
+ if(!tabs.length)return null;
+ const active=tabs.find(t=>t.tab.id===data.activeTabId)??tabs[0],draft=active.tab.id===data.activeTabId?data.draft:undefined;
+ return {...prepared,tabs,data:{contents:active.tab.contents,filename:active.tab.filename,dirty:active.tab.dirty,tabs:tabs.map(t=>t.tab),activeTabId:active.tab.id,...(draft?{draft}:{})}};
+}

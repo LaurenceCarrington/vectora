@@ -127,10 +127,10 @@ export class DocumentFiles {
    const result=await this.recovery.readValidated(async prepared=>{
     const fonts=new Set(prepared.tabs.flatMap(tab=>tab.loaded.fontIds));await Promise.all([...fonts].map(loadTextFont));
    });
-   this.recoveryWritesAllowed=result.status==='valid'||result.status==='missing';
+   this.recoveryWritesAllowed=result.status==='valid'||result.status==='missing'||result.status==='empty';
    if(result.status==='unavailable')this.notify('Browser recovery could not be saved or fully checked because storage is unavailable. Automatic backup is paused until you explicitly create or open a document. Use Save to keep a copy of your drawing.','warning');
    if(result.status==='invalid')this.notify('Could not restore the browser copies. Stored recovery data has been kept; automatic backup is paused until you explicitly create or open a document. Use Save to keep a separate copy.','warning');
-   if(result.status==='valid'&&result.issues.length)this.notify(`Some browser recovery data could not be restored. Usable documents were recovered and the original copies have been kept. ${result.issues.join(' ')}`,'warning');
+   if((result.status==='valid'||result.status==='empty')&&result.issues.length)this.notify(`Some browser recovery data could not be restored. ${result.status==='valid'?'Usable documents were recovered':'The usable copies contain no objects to restore'} and the original copies have been kept. ${result.issues.join(' ')}`,'warning');
    if(result.status==='valid'&&!this.changedDuringStartup){
     const data=result.prepared.data;
     const recovered:DocumentTab[]=result.prepared.tabs.map(({tab,loaded})=>({...tab,handle:null,savedKey:'',renamed:tab.dirty,state:{snapshot:loaded.snapshot,view:loaded.view,undo:[],redo:[],tool:'select'}}));

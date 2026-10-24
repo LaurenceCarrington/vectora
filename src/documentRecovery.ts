@@ -8,7 +8,7 @@ interface RecoveryRecord {version:1;time:number;id:string;data:RecoveryData;sess
 interface RejectedCandidate {source:string;raw:unknown;reason:string}
 export type RecoverySelection=
  | {status:'valid';prepared:PreparedRecovery;issues:string[];fallback:boolean}
- | {status:'missing'|'invalid'|'unavailable';issues:string[]};
+ | {status:'missing'|'empty'|'invalid'|'unavailable';issues:string[]};
 
 const MAX_QUARANTINE=8,MAX_RECOVERY_TIME=8640000000000000;
 const sourceOrder=['journal','database','previous journal','previous database','superseded database'];
