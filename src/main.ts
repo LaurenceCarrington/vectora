@@ -280,7 +280,7 @@ previewButton.addEventListener('click',async()=>{
 const exportDialog=new ExportDialog(editor,()=>{
  if(!inlineText.finish(false,false))return false;
  editor.cancel();closeMenus();selectionContextMenu.close();editor.nodes.closeMenu();return true;
-},notify);
+},notify,()=>documentFiles.documentId);
 function update():void {
   $('.ruler-unit').textContent=generalPreferences.value.units;
   for(const [selector,name] of [['.ruler-left','Vertical'],['.ruler-bottom','Horizontal']])$(selector).setAttribute('aria-label',`${name} ruler in ${UNIT_NAMES[generalPreferences.value.units]}`);

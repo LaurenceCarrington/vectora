@@ -56,3 +56,9 @@
 **/*.log
 **/*.tsbuildinfo
 **/__pycache__/
+
+# Bundled icon attribution and license.
+!/public/icons/
+/public/icons/*
+!/public/icons/README.md
+!/public/icons/Tabler-LICENSE.txt

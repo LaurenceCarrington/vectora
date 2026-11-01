@@ -134,6 +134,8 @@ For another static host, publish `dist/`. When deploying under a subdirectory, s
 npm run build -- --base /vectora/
 ```
 
-## Font attribution
+## Icon and font attribution
+
+Interface icons use Tabler Outline with matching Vectora CAD extensions. See [public/icons/README.md](public/icons/README.md) for sources and the bundled MIT license.
 
 Bundled fonts retain their own licenses and notices. See [public/fonts/README.md](public/fonts/README.md) for font sources, licensing and single-line engraving data provenance.

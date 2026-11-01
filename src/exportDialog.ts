@@ -21,10 +21,11 @@ const select=(name:string,label:string,options:[string,string][],value:string)=>
 export class ExportDialog {
  private dialog=document.createElement('dialog');private format:ExportTab='svg';
  private settings=Object.fromEntries(formats.map(f=>[f.id,fresh()])) as Record<ExportTab,Settings>;
+ private layerChoices=new Map<string,Partial<Record<ExportTab,{included:Set<string>;known:Set<string>}>>>();
  private scope='drawing';private returnFocus:HTMLElement|null=null;private url='';private revision=0;private timer=0;private busy=false;
  private prepared:{contents:string;svg:string;width:number;height:number;pixels:number}|null=null;
  private cache=new Map<string,string>();
- constructor(private editor:CADEditor,private beforeOpen:()=>boolean,private notify:(message:string,kind:'success'|'error')=>void){
+ constructor(private editor:CADEditor,private beforeOpen:()=>boolean,private notify:(message:string,kind:'success'|'error')=>void,private documentId:()=>string){
   this.dialog.id='export-dialog';this.dialog.className='export-dialog menu-surface';this.dialog.setAttribute('aria-labelledby','export-title');
   this.dialog.innerHTML=`<header class="export-header"><div><h2 id="export-title">Export</h2><p>Create a file for print, cutting or sharing.</p></div><button class="tool" type="button" aria-label="Close export">${icon('close')}</button></header><div class="export-body"><nav class="export-formats" role="tablist" aria-label="Export format" aria-orientation="vertical">${formats.map(f=>`<button type="button" role="tab" id="export-tab-${f.id}" aria-controls="export-options" data-format="${f.id}">${icon(f.icon)}<span>${f.name}</span></button>`).join('')}</nav><div class="export-main"><div class="export-preview"><img alt="Export preview"><p data-preview-empty>No export preview</p></div><p class="export-size" role="status" data-export-size></p><form id="export-options" class="export-options" role="tabpanel"><div class="export-fields"><label>Filename<input class="number-input" id="export-filename" required maxlength="180" autocomplete="off"></label><label>Export area<select class="number-input" id="export-scope"><option value="drawing">Drawing</option><option value="selection">Selection</option></select></label></div><p class="export-format-hint"></p><div class="export-fields" data-format-fields></div><details class="export-advanced"><summary>Advanced</summary><div class="export-fields" data-advanced-fields></div><fieldset class="export-layers"><legend>Layers</legend><p>Checked layers are included, even when hidden. Construction is excluded.</p><div data-export-layers></div></fieldset></details><p class="export-error" role="alert" hidden></p></form></div></div><footer class="export-footer"><span data-export-footer></span><button class="button" type="button" data-export-cancel>Cancel</button><button class="button" type="submit" form="export-options" data-export-submit>Export SVG</button></footer>`;
   document.body.append(this.dialog);
@@ -53,7 +54,10 @@ export class ExportDialog {
  private choose(format:ExportTab):void {
   if(this.busy)return;this.format=format;const settings=this.settings[format],dxf=format==='dxf';
   const layers=this.editor.documentLayers.filter(layer=>layer.data.objectRole!=='construction'&&(!dxf||layer.data.objectRole!=='raster'));
-  if(!settings.layers)settings.layers=new Set(layers.filter(layer=>dxf?layer.data.objectRole!=='artwork':layer.visible).map(layer=>layer.data.documentId));
+  const id=this.documentId(),byFormat=this.layerChoices.get(id)??{};this.layerChoices.set(id,byFormat);
+  const choices=byFormat[format]??={included:new Set<string>(),known:new Set<string>()};
+  for(const layer of layers){const layerId:string=layer.data.documentId;if(!choices.known.has(layerId)){choices.known.add(layerId);if(dxf?layer.data.objectRole!=='artwork':layer.visible)choices.included.add(layerId);}}
+  settings.layers=choices.included;
   this.dialog.querySelectorAll<HTMLButtonElement>('[data-format]').forEach(button=>{const active=button.dataset.format===format;button.setAttribute('aria-selected',String(active));button.tabIndex=active?0:-1;});
   this.get('form').setAttribute('aria-labelledby',`export-tab-${format}`);
   this.get('.export-format-hint').textContent=formats.find(f=>f.id===format)!.hint;

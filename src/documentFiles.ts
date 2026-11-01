@@ -79,6 +79,7 @@ export class DocumentFiles {
  get recoveryBytes():number{return this.recovery.usageBytes;}
  private scheduleBackup():void {if(this.timer===undefined)this.timer=window.setTimeout(()=>{this.timer=undefined;this.cache();},generalPreferences.value.backupInterval);}
  private captureCommitted(snapshot?:DocumentSnapshot):void {this.committedContents=encodeDocument(this.editor,false);this.committedKey=documentKey(this.editor,snapshot);this.committedViewKey=JSON.stringify([paper.view.zoom,paper.view.center.x,paper.view.center.y]);}
+ get documentId():string {return this.activeId;}
  private get activeTab():DocumentTab {return this.tabs.find(tab=>tab.id===this.activeId)!;}
  private renderTabs(activeDirty?:boolean):void {
   this.tabBar.render(this.tabs.map(tab=>({id:tab.id,filename:tab.id===this.activeId?this.filename:tab.filename,dirty:tab.id===this.activeId?(activeDirty??(this.dirty||!!this.draft())):tab.dirty})),this.activeId,this.busy);
