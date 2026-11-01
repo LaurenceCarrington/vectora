@@ -45,14 +45,14 @@ export class DocumentFiles {
  private tabBar:DocumentTabs;
  private setup=new NewDocumentDialog();
 
- constructor(private editor:CADEditor,private dialog:HTMLDialogElement,private input:HTMLInputElement,private prepare:()=>boolean,private notify:(message:string,kind:AlertKind)=>void){
+ constructor(private editor:CADEditor,private dialog:HTMLDialogElement,private input:HTMLInputElement,private prepare:(renaming?:boolean)=>boolean,private notify:(message:string,kind:AlertKind)=>void){
   this.savedKey=documentKey(editor);
   this.tabs=[{id:this.activeId,filename:this.filename,handle:null,savedKey:this.savedKey,renamed:false,dirty:false,state:editor.captureSession(),contents:encodeDocument(editor)}];
   this.tabBar=new DocumentTabs(document.querySelector<HTMLElement>('[data-document-tabs]')!,{select:id=>this.selectTab(id),close:id=>this.closeTab(id),create:()=>this.newDocument()});
   this.recovery=new WorkspaceRecovery(message=>this.notify(message,'warning'));
   this.nameControl=new DocumentName(document.querySelector<HTMLElement>('[data-document-name]')!,name=>{
    this.filename=name;this.handle=null;this.renamed=true;this.cache();
-  },()=>{if(this.busy||!this.prepare())return false;this.editor.cancel();return true;},as=>{void this.save(as);});
+  },()=>{if(this.busy||!this.prepare(true))return false;this.editor.cancel();return true;},as=>{void this.save(as);});
   this.updateName();
   dialog.addEventListener('keydown',event=>event.stopPropagation());
   input.addEventListener('change',()=>{const file=input.files?.[0];input.value='';if(file)void this.run(()=>this.load(file,null));});

@@ -71,7 +71,7 @@ function updateSelectionMenu():void {
 }
 const selectionContextMenu=new SelectionContextMenu(editor,()=>closeMenus());
 const inlineText=new InlineText($<HTMLTextAreaElement>('#inline-text'),editor);
-const documentFiles=new DocumentFiles(editor,$<HTMLDialogElement>('#document-dialog'),$<HTMLInputElement>('#open-document-file'),()=>{if(!inlineText.finish(false,false))return false;objectCreation.stop();updatePropertiesContent();updateSelectionMenu();closeMenus();selectionContextMenu.close();selectionMenu.popouts.close();return true;},notify);
+const documentFiles=new DocumentFiles(editor,$<HTMLDialogElement>('#document-dialog'),$<HTMLInputElement>('#open-document-file'),renaming=>{if(!inlineText.finish(false,false))return false;objectCreation.stop();updatePropertiesContent();updateSelectionMenu();if(!renaming)closeMenus();selectionContextMenu.close();selectionMenu.popouts.close();return true;},notify);
 // Async edits (for example font loading) must not leave stale sampling pixels.
 const documentChanged=editor.onDocumentChange;
 editor.onDocumentChange=snapshot=>{colourSampler.cancel();documentChanged(snapshot);};

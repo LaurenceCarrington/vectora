@@ -4,6 +4,7 @@
 
 # Application entry point and reproducible build configuration.
 !/.gitignore
+!/README.md
 !/index.html
 !/package.json
 !/package-lock.json
