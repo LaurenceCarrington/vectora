@@ -1,4 +1,4 @@
-# Track only the inputs required to build and publish Vectora.
+# Track the application inputs and reusable agent authoring kit.
 # Everything else stays local by default. Do not force-add development files.
 /*
 
@@ -9,6 +9,11 @@
 !/package.json
 !/package-lock.json
 !/tsconfig.json
+
+# Agent-facing offline authoring kit, including portable examples and self-tests.
+!/AGENTS.md
+!/skills/
+!/skills/**
 
 # GitHub Pages deployment.
 !/.github/

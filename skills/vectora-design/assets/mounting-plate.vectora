@@ -1,0 +1,324 @@
+{
+  "format": "vectora",
+  "version": 1,
+  "units": "mm",
+  "rasterLayerInitialized": true,
+  "grid": {
+    "type": "square",
+    "spacing": 10,
+    "angle": 15
+  },
+  "canvasSize": {
+    "kind": "fixed",
+    "width": 120,
+    "height": 80,
+    "unit": "mm"
+  },
+  "activeLayerId": "artwork",
+  "layers": [
+    {
+      "id": "artwork",
+      "name": "Artwork",
+      "role": "artwork",
+      "visible": true,
+      "locked": false,
+      "objects": []
+    },
+    {
+      "id": "cutline",
+      "name": "Cut Path",
+      "role": "cutline",
+      "visible": true,
+      "locked": false,
+      "objects": [
+        {
+          "kind": "compound",
+          "contours": [
+            {
+              "closed": true,
+              "segments": [
+                [
+                  10,
+                  10,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  110,
+                  10,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  110,
+                  70,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  10,
+                  70,
+                  0,
+                  0,
+                  0,
+                  0
+                ]
+              ]
+            },
+            {
+              "closed": true,
+              "segments": [
+                [
+                  23,
+                  40,
+                  0,
+                  -1.6568542494923801,
+                  0,
+                  1.6568542494923801
+                ],
+                [
+                  20,
+                  43,
+                  1.6568542494923801,
+                  0,
+                  -1.6568542494923801,
+                  0
+                ],
+                [
+                  17,
+                  40,
+                  0,
+                  1.6568542494923801,
+                  0,
+                  -1.6568542494923801
+                ],
+                [
+                  20,
+                  37,
+                  -1.6568542494923801,
+                  0,
+                  1.6568542494923801,
+                  0
+                ]
+              ]
+            },
+            {
+              "closed": true,
+              "segments": [
+                [
+                  103,
+                  40,
+                  0,
+                  -1.6568542494923801,
+                  0,
+                  1.6568542494923801
+                ],
+                [
+                  100,
+                  43,
+                  1.6568542494923801,
+                  0,
+                  -1.6568542494923801,
+                  0
+                ],
+                [
+                  97,
+                  40,
+                  0,
+                  1.6568542494923801,
+                  0,
+                  -1.6568542494923801
+                ],
+                [
+                  100,
+                  37,
+                  -1.6568542494923801,
+                  0,
+                  1.6568542494923801,
+                  0
+                ]
+              ]
+            }
+          ],
+          "data": {
+            "uid": "plate",
+            "role": "cutline",
+            "name": "100 × 60 mm plate · two 6 mm holes"
+          },
+          "visible": true,
+          "locked": false,
+          "style": {
+            "fill": null,
+            "stroke": "#FF0000",
+            "width": 1.5,
+            "scaling": false,
+            "fillRule": "evenodd",
+            "cap": "round",
+            "join": "round",
+            "miter": 10,
+            "dash": [],
+            "offset": 0,
+            "opacity": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "engrave",
+      "name": "Engrave Path",
+      "role": "engrave",
+      "visible": true,
+      "locked": false,
+      "objects": [
+        {
+          "kind": "path",
+          "contours": [
+            {
+              "closed": true,
+              "segments": [
+                [
+                  72,
+                  40,
+                  0,
+                  -6.6274169979695206,
+                  0,
+                  6.6274169979695206
+                ],
+                [
+                  60,
+                  52,
+                  6.6274169979695206,
+                  0,
+                  -6.6274169979695206,
+                  0
+                ],
+                [
+                  48,
+                  40,
+                  0,
+                  6.6274169979695206,
+                  0,
+                  -6.6274169979695206
+                ],
+                [
+                  60,
+                  28,
+                  -6.6274169979695206,
+                  0,
+                  6.6274169979695206,
+                  0
+                ]
+              ]
+            }
+          ],
+          "data": {
+            "uid": "engraved-ring",
+            "role": "engrave",
+            "name": "24 mm engraved ring"
+          },
+          "visible": true,
+          "locked": false,
+          "style": {
+            "fill": null,
+            "stroke": "#0000FF",
+            "width": 1.5,
+            "scaling": false,
+            "fillRule": "evenodd",
+            "cap": "round",
+            "join": "round",
+            "miter": 10,
+            "dash": [],
+            "offset": 0,
+            "opacity": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "construction",
+      "name": "Construction Path",
+      "role": "construction",
+      "visible": true,
+      "locked": false,
+      "objects": []
+    },
+    {
+      "id": "notes",
+      "name": "Design notes",
+      "role": "artwork",
+      "visible": true,
+      "locked": false,
+      "colour": "#383838",
+      "objects": [
+        {
+          "kind": "path",
+          "contours": [
+            {
+              "closed": true,
+              "segments": [
+                [
+                  60,
+                  36,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  63.46410161513776,
+                  42,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  56.53589838486224,
+                  42,
+                  0,
+                  0,
+                  0,
+                  0
+                ]
+              ]
+            }
+          ],
+          "data": {
+            "uid": "alignment-mark",
+            "role": "artwork",
+            "name": "Artwork alignment marker",
+            "sides": 3
+          },
+          "visible": true,
+          "locked": false,
+          "style": {
+            "fill": null,
+            "stroke": "#383838",
+            "width": 1,
+            "scaling": false,
+            "fillRule": "evenodd",
+            "cap": "round",
+            "join": "round",
+            "miter": 10,
+            "dash": [],
+            "offset": 0,
+            "opacity": 1
+          }
+        }
+      ]
+    }
+  ],
+  "view": {
+    "zoom": 3.7795275590551185,
+    "center": [
+      60,
+      40
+    ]
+  }
+}

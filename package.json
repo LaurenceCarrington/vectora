@@ -8,7 +8,10 @@
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "npm run build && playwright test"
+    "test": "npm run build && playwright test",
+    "design:build": "node skills/vectora-design/scripts/vectora.mjs build",
+    "design:lint": "node skills/vectora-design/scripts/vectora.mjs lint",
+    "design:test": "node --test skills/vectora-design/tests/*.test.mjs"
   },
   "dependencies": {
     "clipper2-wasm": "0.4.0",
