@@ -222,9 +222,10 @@ export class CADEditor {
     if(this.canvasSize.kind!=='fixed')return;
     const bounds=this.canvas.getBoundingClientRect(),r=(selector:string)=>document.querySelector<HTMLElement>(selector)?.getBoundingClientRect();
     const left=(r('.ruler-left')?.right??r('.left-toolbar')?.right??bounds.left)-bounds.left;
-    const right=(r('.layers-panel:not([hidden])')?.left??r('.right-toolbar')?.left??bounds.right)-bounds.left;
+    const panel=document.querySelector<HTMLElement>('.layers-panel:not([hidden])'),bottomPanel=panel?.dataset.panelLayout==='bottom';
+    const right=((!bottomPanel?panel?.getBoundingClientRect().left:undefined)??r('.right-toolbar')?.left??bounds.right)-bounds.left;
     const top=(r('.document-tabs')?.bottom??r('.top-toolbar')?.bottom??bounds.top)-bounds.top;
-    const bottom=(r('.ruler-bottom')?.top??r('.workspace-footer')?.top??bounds.bottom)-bounds.top;
+    const bottom=Math.min(r('.ruler-bottom')?.top??r('.workspace-footer')?.top??bounds.bottom,bottomPanel?panel!.getBoundingClientRect().top:bounds.bottom)-bounds.top;
     const {width,height}=this.canvasSize,zoom=Math.max(MIN_ZOOM,Math.min(MAX_ZOOM,(Math.max(100,right-left)-64)/width,(Math.max(100,bottom-top)-64)/height));
     paper.view.zoom=zoom;paper.view.center=new paper.Point(width/2+(paper.view.viewSize.width/2-(left+right)/2)/zoom,height/2+(paper.view.viewSize.height/2-(top+bottom)/2)/zoom);this.changed();
   }

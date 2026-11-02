@@ -2,7 +2,6 @@ import {bindLength,setLength,readLength} from './measurementDisplay';
 import {generalPreferences,UNIT_NAMES} from './generalPreferences';
 import {unitScale} from './canvasSize';
 import {preciseGeometry,type PreciseProperty} from './shapeProperties';
-import {CREATION_NAMES} from './shapeCreation';
 import type {CADEditor} from './editor';
 /** Shares compact creation fields while retaining bounds for arbitrary geometry. */
 export class ObjectProperties {
@@ -33,10 +32,16 @@ export class ObjectProperties {
   const find=<T extends HTMLElement>(selector:string)=>this.host.querySelector<T>(selector)!,selected=this.editor.selected,geometry=preciseGeometry(selected);
   const signature=`${selected?.data.uid??''}:${geometry?.kind??''}`;
   if(signature!==this.signature){this.signature=signature;this.measurement='radius';find<HTMLSelectElement>('#shape-measurement').value='radius';this.details.open=false;}
-  find('#properties-edit-title').textContent=geometry?`Edit ${CREATION_NAMES[geometry.kind]}`:this.editor.selectedItems.length>1?'Edit selection':`Edit ${selected?.data.name??'object'}`;
-  find('#property-coordinate-help').textContent=geometry?(geometry.kind==='line'?'X/Y is the start point. Angles run clockwise.':'X/Y is the centre. Angles run clockwise.'):'X/Y is the top-left of the bounds. Dimensions are axis-aligned.';
+  find('#property-summary-icon').setAttribute('href',this.editor.selectedItems.length>1?'#i-layers':selected?.data.text?'#i-text':selected?.data.dimension?'#i-dimensions':`#i-${geometry?.kind??'shapes'}`);
+  const coordinateHelp=geometry?(geometry.kind==='line'?'X/Y is the start point. Angles run clockwise.':'X/Y is the centre. Angles run clockwise.'):'X/Y is the top-left of the bounds. Dimensions are axis-aligned.';
+  find('#property-coordinate-help').textContent=coordinateHelp;
+  for(const key of ['x','y']){
+   const input=find<HTMLInputElement>(`#field-${key}`);
+   input.title=coordinateHelp;input.closest<HTMLElement>('.creation-field')!.title=coordinateHelp;
+  }
   this.details.hidden=!geometry;
   for(const field of [...this.dimensionFields,this.rotation]){const target=geometry?this.bounds:this.position;if(field.parentElement!==target)target.append(field);}
+  if(!geometry&&this.position.firstElementChild!==this.dimensionFields[0])this.position.prepend(...this.dimensionFields);
   find('#shape-properties').hidden=!geometry||geometry.kind==='arc';find('#shape-measurement-field').hidden=geometry?.kind!=='circle';
   const diameter=this.measurement==='diameter',countName=geometry?.kind==='star'?'Points':'Sides';
   find('#shape-radius-label').textContent=diameter?'Diameter':'Radius';find('#shape-radius').previousElementSibling!.textContent=diameter?'Ø':'R';find('#shape-count-label').textContent=countName;

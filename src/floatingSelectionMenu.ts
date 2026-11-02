@@ -99,7 +99,9 @@ export class FloatingSelectionMenu {
     }
     let overDock=false;
     for(const panel of this.stage.querySelectorAll<HTMLElement>('.layers-panel:not([hidden])')){
-      const edge=panel.getBoundingClientRect().left-originX;
+      const rect=panel.getBoundingClientRect();
+      if(panel.dataset.panelLayout==='bottom'){bottom=Math.min(bottom,rect.top-originY);continue;}
+      const edge=rect.left-originX;
       // On narrow screens a dock can cover almost the entire canvas. Keep the menu reachable above it.
       if(edge-left>=220+2*this.inset)right=Math.min(right,edge);else overDock=true;
     }

@@ -30,13 +30,16 @@ export class ObjectCreation {
   const context=this.model.context();this.kind=kind;this.tool=tool;this.selection=context.selection;this.measurement='radius';this.inputs.clear();
   this.element.replaceChildren();this.element.hidden=false;this.element.setAttribute('aria-label',`Create ${CREATION_NAMES[kind]}`);
   const heading=document.createElement('h3');heading.textContent=`Create ${CREATION_NAMES[kind]}`;this.element.append(heading);
-  const hint=document.createElement('p');hint.className='subtext';hint.textContent=kind==='line'?'X/Y is the start point. Angles run clockwise.':kind==='rectangle'||kind==='ellipse'||kind==='heart'?'X/Y is the top-left corner.':'X/Y is the centre. Angles run clockwise.';this.element.append(hint);
+  const hint=document.createElement('p');hint.className='sr-only';hint.id=`${this.element.parentElement!.id||'creation'}-coordinate-help`;hint.textContent=kind==='line'?'X/Y is the start point. Angles run clockwise.':kind==='rectangle'||kind==='ellipse'||kind==='heart'?'X/Y is the top-left corner.':'X/Y is the centre. Angles run clockwise.';this.element.append(hint);
   const grid=document.createElement('div');grid.className='number-grid creation-fields';this.element.append(grid);
   for(const field of creationFields(kind,context.centre,context.sides,context.points)){
    const wrapper=document.createElement('div');wrapper.className=`creation-field${field.key==='weight'?' creation-full-width':''}`;
    const id=`${this.element.parentElement!.id||'creation'}-new-${field.key}`;
    wrapper.innerHTML=`<label class="creation-label" for="${id}">${field.label}</label><div class="number-shell"><span class="number-prefix">${field.prefix}</span><input class="number-input" id="${id}" type="number" step="${field.integer?'1':'any'}" aria-label="${field.name}" aria-invalid="false"><span class="number-unit">${field.unit}</span></div>`;
    const input=wrapper.querySelector('input')!;input.value=String(Number(field.value.toFixed(6)));if(field.min!==undefined)input.min=String(field.min);if(field.max!==undefined)input.max=String(field.max);input.required=true;
+   if(field.key==='x'||field.key==='y'||field.key==='angle'){
+    wrapper.title=input.title=hint.textContent!;input.setAttribute('aria-describedby',hint.id);
+   }
    if(field.unit==='mm'){bindLength(input,field.label);setLength(input,field.value,field.label);}
    input.oninput=()=>{input.setAttribute('aria-invalid','false');input.closest('.number-shell')!.classList.remove('is-invalid');if(this.error&&!this.model.context().layer.error)this.error.hidden=true;};
    this.inputs.set(field.key,input);grid.append(wrapper);
