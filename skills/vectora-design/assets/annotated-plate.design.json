@@ -1,0 +1,21 @@
+{
+  "format": "vectora-design",
+  "version": 1,
+  "units": "mm",
+  "canvasSize": {"kind":"fixed","width":200,"height":135,"unit":"mm"},
+  "view": {"zoom":3.7795275590551185,"center":[100,67.5]},
+  "objects": [
+    {"type":"compound","id":"plate","name":"100 × 60 mm plate with two 6 mm holes","layer":"cutline","contours":[
+      {"type":"rectangle","x":30,"y":30,"width":100,"height":60},
+      {"type":"circle","cx":40,"cy":60,"radius":3},
+      {"type":"circle","cx":120,"cy":60,"radius":3}
+    ]},
+    {"type":"text","id":"title","content":"ANNOTATED PLATE","x":30,"y":10,"size":5},
+    {"type":"text","id":"note","content":"Editable labels · exact curves","x":30,"y":19,"size":3.2},
+    {"type":"dimension","id":"width","kind":"linear","axis":"x","points":[[30,90],[130,90]],"position":[30,105]},
+    {"type":"dimension","id":"height","kind":"aligned","points":[[130,30],[130,90]],"position":[147,30]},
+    {"type":"dimension","id":"hole-radius","kind":"radial","points":[[40,60],[43,60]],"position":[12,45]},
+    {"type":"dimension","id":"hole-note","kind":"leader","points":[[120,60],[160,60]],"position":[165,55],"text":"Ø 6 holes"},
+    {"type":"arrow","id":"direction","name":"Independent arrow","points":[[155,105],[170,90],[180,90]],"headLength":3,"headWidth":2}
+  ]
+}

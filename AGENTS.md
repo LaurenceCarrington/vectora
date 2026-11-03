@@ -2,17 +2,19 @@
 
 Agents may create complete, editable `.vectora` drawings offline and hand the file to the user to open in Vectora. Use the native **version-1 JSON document format**, with millimetre geometry; do not rename SVG/DXF or a Paper.js/history snapshot to `.vectora`.
 
+**Default delivery is one `.vectora` file containing the complete design.** Keep multiple floor plans, views, parts and variants together, spaced apart at full-size mm scale and organized with descriptive names/layers. Use an infinite canvas when needed. Recipes/scripts are temporary build inputs. Produce separate native files, PDFs, SVGs, PNG previews, ZIP bundles, READMEs or recipe deliverables only when the user explicitly requests them. Use the offline build/lint path for speed; do not install dependencies, start an app server or generate previews merely for delivery. If native limits prevent one valid document, explain the limit and ask how to divide it.
+
 ## Skill routing
 
 - Creating shapes/designs or editing a native file: read [vectora-design](skills/vectora-design/SKILL.md).
 - Linting/repairing a design, or maintaining format tooling: read [vectora-design-lint](skills/vectora-design-lint/SKILL.md).
 - Exact native fields and limits: [native format](skills/vectora-design/references/native-format.md). Simpler builder input: [recipe guide](skills/vectora-design/references/recipe.md).
 
-The repository's `skills/` contains portable `SKILL.md` entrypoints. Harnesses can follow these links directly or install those folders into their own supported skills location; no harness-specific home paths are required. Scripts use Node 18+ and only its standard library, so authoring/linting works without a browser, app server, network or `npm install`.
+The repository's `skills/` contains portable `SKILL.md` entrypoints. Harnesses can follow these links directly or install those folders into their own supported skills location; no harness-specific home paths are required. Authoring/linting uses Node 18+ and only its standard library, without a browser, app server, network or `npm install`. The optional font-data maintenance script uses the application's existing `opentype.js` dependency; ordinary design creation uses the prepared bundled data.
 
 ## Build a design offline
 
-1. Write a recipe with `format: "vectora-design"`, `version: 1`, `units: "mm"` and an `objects` array. Start from [the mounting-plate recipe](skills/vectora-design/assets/mounting-plate.design.json). The builder supports rectangles, circles, ellipses, regular polygons, lines, polylines, native Bézier paths and compound contours. All dimensions/points remain mm even when a canvas display unit is inches or centimetres.
+1. Write a recipe in a task-specific temporary directory with `format: "vectora-design"`, `version: 1`, `units: "mm"` and an `objects` array. Start from [the mounting-plate recipe](skills/vectora-design/assets/mounting-plate.design.json). The builder supports rectangles, circles, ellipses, regular polygons, lines, polylines, native Bézier paths, compound contours, editable Lato text, dimensions/leaders and arrows. Use the annotation helpers rather than recreating font/arrow geometry; the [annotated plate](skills/vectora-design/assets/annotated-plate.design.json) shows their fields. Dimensions stay in Artwork; text stays filled and editable. All dimensions/points remain mm even when a canvas display unit is inches or centimetres.
 2. Assign actual layer IDs/roles: `artwork`, `cutline`, `engrave`, `construction` (and existing raster vectors when relevant). Cuts are red `#FF0000`, engraving blue `#0000FF`, construction magenta `#FF00FF`; colour alone does not change operation. Paths normally remain unfilled. Put perforated-part contours into a compound when they should edit as one object; preserve holes with the intended fill rule. Closed contours use `closed: true`, without repeating the first anchor.
 3. Build the native file, then lint it:
 
@@ -22,8 +24,8 @@ The repository's `skills/` contains portable `SKILL.md` entrypoints. Harnesses c
    ```
 
    Optional npm aliases: `npm run design:build -- ...`, `npm run design:lint -- ...`. Existing output is protected unless `--force` is explicit. `--json` exposes stable issue codes and JSON paths; `--strict` also fails on warnings. Lint is read-only. Exit codes: 0 passed, 1 design/JSON or strict-warning failure, 2 usage/filesystem failure.
-4. Check the reported object count/bounds and intended dimensions; review warnings rather than changing the user's design to silence them. Deliver both `.vectora` and recipe files plus a short lint result. The ready-to-open [example](skills/vectora-design/assets/mounting-plate.vectora) is illustrative, not manufacturing guidance.
-5. In Vectora use **File → Open** / **Ctrl or Cmd+O**, then choose the `.vectora` file. The current editor opens it in a new active document tab and retains existing tabs; it does not merge the geometry into the current drawing. No hosted upload service is needed. If the app is available, inspect and save/reopen the artifact before claiming an in-app round trip passed. Report when only offline checks were possible.
+4. Check the reported object count/bounds and intended dimensions; review warnings rather than changing the user's design to silence them. Deliver one link to the complete `.vectora` file plus a short lint result in the response; include companion files only when explicitly requested. The ready-to-open [example](skills/vectora-design/assets/mounting-plate.vectora) is illustrative, not manufacturing guidance.
+5. In Vectora use **File → Open** / **Ctrl or Cmd+O**, then choose the `.vectora` file. The current editor opens it in a new active document tab and retains existing tabs; it does not merge the geometry into the current drawing. No hosted upload service is needed. Use an already available app for optional inspection, or perform an in-app check when explicitly requested. Inspect and save/reopen the artifact before claiming an in-app round trip passed; otherwise report offline checks only.
 
 ## Native-file invariants and lint maintenance
 

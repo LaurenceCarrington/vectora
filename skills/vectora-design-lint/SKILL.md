@@ -14,6 +14,8 @@ Exit 0 means no errors (and, with `--strict`, no warnings); exit 1 means invalid
 
 Read [the native format reference](../vectora-design/references/native-format.md) when constructing or repairing native fields. Fix errors against the source recipe when available, rebuild to a new output, and rerun lint. Preserve source curves, dimensions, object identity and intended operations. Resolve ambiguous design choices with the user instead of automatically closing cuts, removing duplicate-looking geometry or changing their dimensions. Explain intentional warnings. An `EDITABLE_METADATA` warning means the shape's schema can be checked offline but font/annotation behavior still needs an in-app edit and save/reopen check.
 
+The recipe `text` and `dimension` helpers intentionally emit editable metadata and therefore receive that warning even when generated correctly. Do not replace them with bare strings, duplicate labels, flattened outlines or discarded metadata. Native dimension labels are rendered from their annotation metadata; ordinary recipe `arrow` objects have no such metadata. The [annotated plate](../vectora-design/assets/annotated-plate.vectora) is a reference for this distinction.
+
 For future tooling or format development:
 
 1. Read `src/documentFormat.ts` and its relevant limits, geometry, font, grid and canvas validators. The native importer is the authority; do not weaken it to accommodate generated output.

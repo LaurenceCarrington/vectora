@@ -49,7 +49,7 @@ test('intentional open cuts, duplicate cuts and off-canvas geometry are advisory
  const before=JSON.stringify(d),result=lintDocument(d);assert.equal(result.ok,true);for(const c of ['OPEN_CUT','DUPLICATE_GEOMETRY','OUTSIDE_CANVAS'])assert.ok(codes(d).includes(c));assert.equal(JSON.stringify(d),before);
 });
 test('invalid recipe options fail instead of silently creating a different design',()=>{
- for(const change of [r=>r.units='in',r=>r.objects[0].width=-1,r=>r.objects[0].layer='missing',r=>r.objects[0].widht=15,r=>r.objects[0].type='text']){const r=recipe();change(r);assert.throws(()=>buildDesign(r));}
+ for(const change of [r=>r.units='in',r=>r.objects[0].width=-1,r=>r.objects[0].layer='missing',r=>r.objects[0].widht=15,r=>r.objects[0].type='unknown']){const r=recipe();change(r);assert.throws(()=>buildDesign(r));}
 });
 test('compound child contours reject object options rather than silently changing their operation',()=>{
  for(const option of [{layer:'engrave'},{style:{stroke:'#0000FF'}},{id:'child'},{visible:false},{locked:true},{name:'child'}]){

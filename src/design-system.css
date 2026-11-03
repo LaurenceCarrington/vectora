@@ -86,11 +86,11 @@
   --slider-width: 240px;
   --slider-track-height: 4px;
   --slider-thumb-size: 20px;
-  --toggle-width: 40px;
+  --toggle-width: 48px;
   --toggle-height: 24px;
-  --toggle-thumb-size: 16px;
-  --toggle-inset: 4px;
-  --toggle-active-thumb: var(--menu-background);
+  --toggle-thumb-size: 20px;
+  --toggle-inset: 2px;
+  --toggle-active-thumb: #FFFFFF;
   --tool-size: 36px;
   --button-height: 32px;
   --button-padding-x: 12px;
@@ -116,6 +116,9 @@
   --commandbar-background: #35373C;
   --chrome-accent: #52B9DF;
   --chrome-selected: #232528;
+  --control-selected-background: #245BDB;
+  --control-selected-foreground: #FFFFFF;
+  --control-selected-hover: #1C4BC0;
   --workspace-edge-inset: 0px;
   --workspace-footer-height: 28px;
   --ruler-size: 20px;
@@ -497,18 +500,19 @@ footer { margin-top: 32px; padding-top: 16px; border-top: 2px solid var(--color-
 .toggle-state { display: block; font-size: var(--text-xs); line-height: 16px; color: var(--color-muted); font-weight: 400; }
 .toggle-hit { display: inline-flex; position: relative; align-items: center; justify-content:flex-end; flex-shrink: 0; width:max(var(--toggle-width),var(--control-hit-height)); height: var(--control-hit-height); }
 .vectora-toggle { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
-.toggle-track { position: relative; display: block; width: var(--toggle-width); height: var(--toggle-height); border-radius: 0; background: var(--menu-hover); box-shadow: inset 0 0 0 2px var(--menu-muted); pointer-events: none; }
-.toggle-track::after { content: ''; position: absolute; left: var(--toggle-inset); top: var(--toggle-inset); width: var(--toggle-thumb-size); height: var(--toggle-thumb-size); border-radius: 0; background: var(--menu-foreground); }
-.vectora-toggle:checked + .toggle-track { background: var(--chrome-accent); box-shadow: none; }
+.toggle-track { position: relative; display: block; width: var(--toggle-width); height: var(--toggle-height); border-radius: var(--radius-pill); background: var(--field-border); box-shadow: inset 0 2px 4px #141B2D26; pointer-events: none; }
+.toggle-track::after { content: ''; position: absolute; left: var(--toggle-inset); top: var(--toggle-inset); width: var(--toggle-thumb-size); height: var(--toggle-thumb-size); border-radius: 50%; background: var(--toggle-active-thumb); box-shadow: 0 1px 3px #141B2D40; }
+.vectora-toggle:checked + .toggle-track { background: var(--control-selected-background); }
 .vectora-toggle:checked + .toggle-track::after { background: var(--toggle-active-thumb); transform: translateX(calc(var(--toggle-width) - var(--toggle-thumb-size) - var(--toggle-inset) * 2)); }
-.vectora-toggle:hover:not(:disabled):checked + .toggle-track { background:color-mix(in srgb,var(--chrome-accent) 88%,var(--menu-foreground)); box-shadow:none; }
-.vectora-toggle:focus-visible + .toggle-track { outline:2px solid var(--chrome-accent); outline-offset:-2px; }
-.vectora-toggle:disabled { cursor: not-allowed; }.vectora-toggle:disabled + .toggle-track { background: var(--menu-hover); box-shadow: inset 0 0 0 2px var(--menu-border); }
-.vectora-toggle:disabled + .toggle-track::after { background: var(--menu-disabled); }
+.vectora-toggle:hover:not(:disabled) + .toggle-track { background:color-mix(in srgb,var(--field-border) 88%,var(--menu-foreground)); }
+.vectora-toggle:hover:not(:disabled):checked + .toggle-track { background:var(--control-selected-hover); }
+.vectora-toggle:focus-visible + .toggle-track { outline:2px solid var(--chrome-accent); outline-offset:2px; }
+.vectora-toggle:disabled { cursor: not-allowed; }.vectora-toggle:disabled + .toggle-track { background: var(--menu-disabled); box-shadow: none; opacity:.5; }
+.vectora-toggle:disabled + .toggle-track::after { box-shadow:none; }
 .toggle-row.is-disabled { cursor: not-allowed; }.is-disabled .toggle-caption, .is-disabled .slider-label { color: var(--color-muted); }
 .control-token-line { margin: var(--space-24) 0 var(--space-8); padding-top: var(--space-16); border-top: var(--border-width) solid var(--color-line); color: var(--color-muted); font-size: var(--text-xs); line-height: 20px; }
 @media (prefers-reduced-motion: no-preference) { .toggle-track, .toggle-track::after { transition: background-color 120ms ease, transform 120ms ease; } }
-@media (forced-colors: active) { .vectora-slider { appearance: auto; -webkit-appearance: auto; }.vectora-slider::-webkit-slider-thumb { appearance: auto; -webkit-appearance: auto; }.toggle-track { border: 2px solid ButtonText; background: Canvas; box-shadow: none; }.toggle-track::after { background: ButtonText; }.vectora-toggle:checked + .toggle-track { background: Highlight; }.vectora-toggle:checked + .toggle-track::after { background: HighlightText; }.vectora-toggle:hover:not(:disabled):checked + .toggle-track { background:Highlight; box-shadow:none; }.vectora-toggle:disabled + .toggle-track { background:Canvas; border-color:GrayText; box-shadow:none; }.vectora-toggle:disabled + .toggle-track::after { background:GrayText; } }
+@media (forced-colors: active) { .vectora-slider { appearance: auto; -webkit-appearance: auto; }.vectora-slider::-webkit-slider-thumb { appearance: auto; -webkit-appearance: auto; }.toggle-track { outline:2px solid ButtonText; outline-offset:-2px; background: Canvas; box-shadow: none; }.toggle-track::after { background: ButtonText; box-shadow:none; }.vectora-toggle:checked + .toggle-track { background: Highlight; }.vectora-toggle:checked + .toggle-track::after { background: HighlightText; }.vectora-toggle:hover:not(:disabled):checked + .toggle-track { background:Highlight; box-shadow:none; }.vectora-toggle:disabled + .toggle-track { background:Canvas; outline-color:GrayText; box-shadow:none; opacity:1; }.vectora-toggle:disabled + .toggle-track::after { background:GrayText; } }
 
 /* Colour fill uses the shared appearance pop-out and field styles. */
 .fill-tools { position:relative; }
@@ -938,6 +942,7 @@ select option:disabled, select optgroup:disabled { color:var(--menu-disabled); }
 }
 :root[data-theme="high-contrast"] {
   --field-background:#FFFFFF; --field-border:#000000;
+  --control-selected-background:#005FCC; --control-selected-hover:#004B9F;
   --primary-background:#005FCC; --primary-foreground:#FFFFFF; --primary-hover:#004B9F;
   --scrollbar-thumb:#000000; --text-highlight:#005FCC33;
   --color-canvas:#FFFFFF; --color-surface:#FFFFFF; --color-toolbar:#FFFFFF; --color-hover:#ECECEC;
@@ -964,7 +969,7 @@ select option:disabled, select optgroup:disabled { color:var(--menu-disabled); }
  .prefs-segments input:focus-visible + span) {
   outline-width:3px; outline-offset:-3px;
 }
-:root[data-theme="high-contrast"] .vectora-toggle:focus-visible + .toggle-track { outline-width:3px; outline-offset:-3px; }
+:root[data-theme="high-contrast"] .vectora-toggle:focus-visible + .toggle-track { outline-width:3px; outline-offset:2px; }
 /* Some shared dark-theme states use surface colours as foregrounds; restore contrast here. */
 :root[data-theme="high-contrast"] .prefs-tab:hover { background:var(--menu-hover); }
 :root[data-theme="high-contrast"] .dropdown-option:focus-visible,
@@ -1683,4 +1688,52 @@ input[type="color"]::-moz-color-swatch { border-radius:0; }
  .responsive-properties .number-input,.creation-specimen .number-input { font-size:16px; min-height:40px; }
  .responsive-properties .number-shell,.creation-specimen .number-shell { min-height:44px; }
  .responsive-properties .editor-panel-body,.responsive-properties [data-properties-body] { padding:12px 16px 20px; overflow:auto; min-height:0; flex:1; overscroll-behavior:contain; }
+}
+
+/* Selected buttons share solid blue tiles and white icons/labels in every surface. */
+:is(.tool.selected,.tool[aria-expanded="true"],.shape-option[aria-checked="true"],
+ .prefs-tab[aria-selected="true"],.layer-object[aria-pressed="true"],
+ .pattern-tabs button[aria-selected="true"],.raster-segments button[aria-pressed="true"],
+ .raster-segments label:has(input:checked) span,.prefs-segments input:checked + span,
+ .help-tab[aria-selected="true"],.export-formats button[aria-selected="true"],
+ .appearance-tabs button[aria-selected="true"],.paint-view-tabs button[aria-selected="true"],
+ .canvas-preset[aria-pressed="true"],.canvas-orientation [aria-pressed="true"],
+ .canvas-preset-tabs [aria-selected="true"],
+ .floating-menu .selection-popout-trigger[aria-expanded="true"]):not(:disabled) {
+  background:var(--control-selected-background); color:var(--control-selected-foreground);
+  border-color:var(--control-selected-background); box-shadow:none;
+}
+:is(.tool.selected,.tool[aria-expanded="true"],.shape-option[aria-checked="true"],
+ .prefs-tab[aria-selected="true"],.layer-object[aria-pressed="true"],
+ .pattern-tabs button[aria-selected="true"],.raster-segments button[aria-pressed="true"],
+ .raster-segments label:has(input:checked) span,.prefs-segments input:checked + span,
+ .help-tab[aria-selected="true"],.export-formats button[aria-selected="true"],
+ .appearance-tabs button[aria-selected="true"],.paint-view-tabs button[aria-selected="true"],
+ .canvas-preset[aria-pressed="true"],.canvas-orientation [aria-pressed="true"],
+ .canvas-preset-tabs [aria-selected="true"],
+ .floating-menu .selection-popout-trigger[aria-expanded="true"]):hover:not(:disabled) {
+  background:var(--control-selected-hover); border-color:var(--control-selected-hover);
+}
+:is(.tool.selected,.tool[aria-expanded="true"],.shape-option[aria-checked="true"],
+ .prefs-tab[aria-selected="true"],.layer-object[aria-pressed="true"],
+ .canvas-preset[aria-pressed="true"]):not(:disabled) :is(svg,kbd,span) {
+  color:var(--control-selected-foreground);
+}
+:is(.tool.selected,.tool[aria-expanded="true"],.shape-option[aria-checked="true"],
+ .prefs-tab[aria-selected="true"],.layer-object[aria-pressed="true"],
+ .pattern-tabs button[aria-selected="true"],.raster-segments button[aria-pressed="true"],
+ .help-tab[aria-selected="true"],.export-formats button[aria-selected="true"],
+ .appearance-tabs button[aria-selected="true"],.paint-view-tabs button[aria-selected="true"],
+ .canvas-preset[aria-pressed="true"],.canvas-orientation [aria-pressed="true"],
+ .canvas-preset-tabs [aria-selected="true"],
+ .floating-menu .selection-popout-trigger[aria-expanded="true"]):focus-visible {
+  outline-color:var(--control-selected-foreground);
+}
+@media(forced-colors:active) {
+ :is(.tool.selected,.tool[aria-expanded="true"],.shape-option[aria-checked="true"],
+  .prefs-tab[aria-selected="true"],.layer-object[aria-pressed="true"],
+  .pattern-tabs,.raster-segments,.prefs-segments,.help-tab,.export-formats,
+  .appearance-tabs,.paint-view-tabs,.canvas-preset,.canvas-orientation,.canvas-preset-tabs,.floating-menu) {
+   --control-selected-background:Highlight; --control-selected-foreground:HighlightText; --control-selected-hover:Highlight;
+ }
 }

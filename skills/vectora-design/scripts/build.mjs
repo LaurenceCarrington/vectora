@@ -1,10 +1,13 @@
 import {finite,identifier,isRecord,tuple,ROLES,INKS,LAYER_NAMES,LIMITS,contourBounds,unionBounds} from './geometry.mjs';
 import {lintDocument} from './lint.mjs';
+import {buildText} from './text.mjs';
+import {buildArrow,buildDimension} from './annotations.mjs';
 const fail=message=>{throw new Error(message);};
 const number=(v,name,min=-1_000_000)=>finite(v)&&v>=min?v:fail(`${name} must be a finite number from ${min} to 1000000.`);
 function keys(value,allowed,label){if(!isRecord(value))fail(`${label} must be an object.`);for(const key of Object.keys(value))if(!allowed.includes(key))fail(`Unknown ${label} field: ${key}.`);}
 const anchor=([x,y])=>[x,y,0,0,0,0];
 const geometryKeys={rectangle:['x','y','width','height'],circle:['cx','cy','radius'],ellipse:['cx','cy','rx','ry'],polygon:['cx','cy','radius','sides','angle'],line:['points'],polyline:['points'],path:['segments','closed'],compound:['contours']};
+const helperKeys={text:['content','x','y','size','fontId','align','angle'],arrow:['points','ends','headLength','headWidth'],dimension:['points','position','kind','axis','text','size']};
 const objectKeys=['type','id','name','layer','visible','locked','style'];
 function contour(shape,child=false){
  const type=shape.type;if(!geometryKeys[type]||type==='compound')fail(`Unsupported contour type: ${String(type)}. Use rectangle, circle, ellipse, polygon, line, polyline or path.`);
@@ -40,14 +43,19 @@ export function buildDesign(recipe){
  const layers=definitions.map(l=>{keys(l,['id','name','role','visible','locked','colour'],'layer');return {id:l.id,name:l.name,role:l.role,visible:l.visible??true,locked:l.locked??false,...(l.colour!==undefined?{colour:l.colour}:{}),objects:[]};});
  const byId=new Map(layers.map(l=>[l.id,l]));let count=0,contours=0,segments=0;
  for(const shape of recipe.objects){
-  if(!isRecord(shape)||!geometryKeys[shape.type])fail(`Unknown shape type: ${String(shape?.type)}.`);
-  keys(shape,[...objectKeys,...geometryKeys[shape.type]],'shape');
+  if(!isRecord(shape)||!geometryKeys[shape.type]&&!helperKeys[shape.type])fail(`Unknown shape type: ${String(shape?.type)}.`);
+  keys(shape,[...objectKeys,...(geometryKeys[shape.type]??helperKeys[shape.type])],'shape');
   const layer=byId.get(shape.layer??'artwork');if(!layer)fail(`Unknown layer: ${shape.layer??'artwork'}.`);
   const uid=shape.id??`object-${++count}`;if(!identifier(uid))fail('Object IDs must match [A-Za-z0-9_-]{1,100}.');
   const data={uid,role:layer.role,name:shape.name??shape.type[0].toUpperCase()+shape.type.slice(1)};
   if(shape.type==='polygon')data.sides=shape.sides;
   let paths;
-  if(shape.type==='compound'){
+  if(helperKeys[shape.type]){
+   if(shape.type==='text'){number(shape.x,'Text x');number(shape.y,'Text y');}
+   if(shape.type==='dimension'&&layer.role!=='artwork')fail('Dimensions and leader annotations must be in an Artwork layer.');
+   const generated=shape.type==='text'?buildText(shape,{contours:LIMITS.contours-contours,segments:LIMITS.segments-segments}):shape.type==='arrow'?buildArrow(shape):buildDimension(shape);
+   paths=generated.paths;Object.assign(data,generated.data);
+  }else if(shape.type==='compound'){
    if(!Array.isArray(shape.contours)||!shape.contours.length||shape.contours.length>LIMITS.contours)fail('Compound contours must be a non-empty array of primitive/path definitions.');
    paths=shape.contours.map(c=>contour(c,true));
   }else paths=[contour(shape)];
@@ -55,10 +63,13 @@ export function buildDesign(recipe){
   if(contours>LIMITS.contours||segments>LIMITS.segments)fail('Design exceeds the document contour or segment budget.');
   const ink=layer.colour??INKS[layer.role];
   const style={fill:null,stroke:ink,width:layer.role==='artwork'?1:1.5,scaling:false,fillRule:'evenodd',cap:'round',join:'round',miter:10,dash:[],offset:0,opacity:1};
+  if(shape.type==='text'){style.fill=ink;style.stroke=null;style.fillRule='nonzero';}
   if(shape.style!==undefined){keys(shape.style,Object.keys(style),'style');Object.assign(style,shape.style);}
+  if(shape.type==='text'&&(style.fill===null||style.stroke!==null))fail('Editable text needs a fill and no stroke; convert to paths for outline lettering.');
+  if(['dimension','arrow'].includes(shape.type)&&style.fill!==null)fail('Dimensions and arrows must be unfilled.');
   if(typeof style.stroke==='string'&&style.stroke!==ink)data.customColour=style.stroke;
-  if(style.fill!==null&&layer.role==='artwork')data.regionFill=true;
-  layer.objects.push({kind:shape.type==='compound'?'compound':'path',contours:paths,data,visible:shape.visible??true,locked:shape.locked??false,style});
+  if(style.fill!==null&&layer.role==='artwork'&&shape.type!=='text')data.regionFill=true;
+  layer.objects.push({kind:shape.type==='compound'||helperKeys[shape.type]?'compound':'path',contours:paths,data,visible:shape.visible??true,locked:shape.locked??false,style});
  }
  const bounds=layers.flatMap(l=>l.objects).flatMap(o=>o.contours).reduce((b,c)=>unionBounds(b,contourBounds(c)),null);
  const doc={format:'vectora',version:1,units:'mm',rasterLayerInitialized:true,grid:recipe.grid??{type:'square',spacing:10,angle:15},canvasSize:recipe.canvasSize??{kind:'infinite'},activeLayerId:recipe.activeLayerId??layers.find(l=>l.role==='artwork')?.id??layers[0].id,layers,view:recipe.view??{zoom:96/25.4,center:bounds?[(bounds.left+bounds.right)/2,(bounds.top+bounds.bottom)/2]:[100,70]}};
