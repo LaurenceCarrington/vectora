@@ -1,3 +1,4 @@
+import './focusIndicators';
 import {canEdit} from './model/entityAccess';
 import {generalPreferences,UNIT_NAMES} from './generalPreferences';
 import {bindLength,setLength,readLength} from './measurementDisplay';
