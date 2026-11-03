@@ -24,7 +24,7 @@ export class ColourPanel {
    <div class="colour-rgb">${['R','G','B'].map(c=>`<label>${c}<input type="number" min="0" max="255" step="1" aria-label="${{R:'Red',G:'Green',B:'Blue'}[c]}" data-colour-channel="${c}"></label>`).join('')}</div>
    <button type="button" class="button paint-none" data-colour-none aria-pressed="false">No fill</button>
    <div class="colour-saved" hidden><p class="subtext">Saved swatches</p><div class="colour-swatches" data-saved-swatches></div></div>
-   <p class="subtext colour-hint" data-colour-hint>Sets the Fill tool colour. Selected Artwork uses this colour too.</p>
+
   </div>`.replace(/(id|for|aria-describedby)="colour-/g,`$1="${idPrefix}-`);
   if(embedded)root.querySelector('.layers-header')!.remove();
   const input=(selector:string)=>root.querySelector<HTMLInputElement>(selector.replace(/^#colour-/,`#${idPrefix}-`))!;
@@ -56,6 +56,5 @@ export class ColourPanel {
  private cancel():void {if(this.pointer===null)return;this.pointer=null;if(this.start){this.set(this.start);this.publish(false);}this.start=null;}
  private position(event:PointerEvent):void {const rect=this.plane.getBoundingClientRect();this.s=Math.max(0,Math.min(1,(event.clientX-rect.left)/rect.width));this.v=1-Math.max(0,Math.min(1,(event.clientY-rect.top)/rect.height));this.render();this.publish(false);}
  set(paint:Paint):void {if(this.busy||this.pointer!==null)return;const [h,s,v]=rgbToHsv(paint.hex);if(s&&v)this.h=h;this.s=s;this.v=v;this.opacity=paint.opacity;this.render();}
- hint(text:string):void {this.root.querySelector<HTMLElement>('[data-colour-hint]')!.textContent=text;}
  private render():void {const paint=this.paint;this.root.style.setProperty('--picker-hue',hsvToHex(this.h,1,1));this.root.style.setProperty('--picker-colour',paint.hex);this.root.style.setProperty('--picker-opacity',String(this.opacity));this.root.style.setProperty('--picker-paint',paint.hex+Math.round(this.opacity*255).toString(16).padStart(2,'0'));this.plane.style.setProperty('--picker-x',`${this.s*100}%`);this.plane.style.setProperty('--picker-y',`${(1-this.v)*100}%`);this.plane.setAttribute('aria-label',`Saturation ${Math.round(this.s*100)}%, brightness ${Math.round(this.v*100)}%`);this.hex.value=paint.hex;this.hue.value=String(Math.round(this.h));this.alpha.value=this.percent.value=String(Math.round(this.opacity*100));this.root.querySelector('output')!.textContent=`${Math.round(this.h)}°`;this.root.querySelectorAll<HTMLInputElement>('[data-colour-channel]').forEach((el,i)=>el.value=String(parseInt(paint.hex.slice(1+i*2,3+i*2),16)));}
 }

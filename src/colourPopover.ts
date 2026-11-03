@@ -18,7 +18,7 @@ export class ColourPopover {
   this.root.setAttribute('role','dialog');document.body.append(this.root);
   this.picker=new ColourPanel(this.root,(paint,commit)=>this.change?.(paint,commit),()=>this.close(true),()=>{},false,`${idPrefix}-picker`);
   if(!(owner instanceof HTMLDialogElement))this.picker.enableSampler((button,choose)=>ColourPopover.canvasSampler?.(button,paint=>choose({...paint,opacity:this.root.classList.contains('colour-popover-solid')?1:paint.opacity})));
-  this.root.querySelector('.panel-eyebrow')!.remove();this.root.querySelector('[data-colour-none]')!.remove();this.root.querySelector('.colour-hint')!.remove();
+  this.root.querySelector('.panel-eyebrow')!.remove();this.root.querySelector('[data-colour-none]')!.remove();
   this.root.querySelector('[aria-label="Close Colour panel"]')!.setAttribute('aria-label','Close colour picker');
   this.header=this.root.querySelector<HTMLElement>('.layers-header')!;
   const handle=this.header.querySelector<HTMLElement>('.layer-heading')!,tokens=getComputedStyle(document.documentElement);

@@ -1,21 +1,27 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { disposePreview, previewAssembly, PREVIEW_MATERIALS } from './materialPreviewSurface';
+import { disposePreview, previewAssembly, PREVIEW_MATERIALS, type PreviewMaterial } from './materialPreviewSurface';
+import { customPreviewMaterial } from './customPreviewMaterial';
+import { materialPreviewSamples } from './materialPreviewSamples';
 import type { MaterialPreviewInput, MaterialPreviewModel, ProcessSettings } from './materialPreviewTypes';
 const icon = (id: string) => `<svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-${id}"/></svg>`;
 const field = (key: string, label: string, value: number, min: number, max: number) => `<label class="preview-field">${label}<div class="number-shell"><input class="number-input" type="number" data-preview-setting="${key}" aria-label="${label} (mm)" min="${min}" max="${max}" step="any" value="${value}"><span class="number-unit">mm</span></div></label>`;
+type MaterialFinish = { metalness: number; roughness: number };
+const finishSlider = (group: string, key: keyof MaterialFinish, label: string, value: number) => `<label class="preview-finish-control"><span class="slider-label"><span>${label}</span><output for="${group}-${key}" data-preview-finish-output="${key}">${value}%</output></span><input id="${group}-${key}" class="vectora-slider" type="range" min="0" max="100" step="1" value="${value}" aria-label="${label}" aria-valuetext="${value}%" data-preview-finish="${key}" style="--range-progress:${value}%"></label>`;
+let materialPickerSequence = 0;
 export function previewDialog(): HTMLDialogElement {
+    const materialGroup = `preview-material-${++materialPickerSequence}`;
     const dialog = document.createElement('dialog');
     dialog.className = 'export-dialog material-preview-dialog menu-surface';
     dialog.id = 'material-preview-dialog';
     dialog.setAttribute('aria-labelledby', 'material-preview-title');
-    dialog.innerHTML = `<header class="export-header"><div><h2 id="material-preview-title">Material &amp; process preview</h2><p>Inspect finished pieces, cut-through holes and recessed engraving.</p></div><button type="button" class="tool" data-preview-close aria-label="Close preview" title="Close preview">${icon('close')}</button></header>
- <div class="material-preview-body"><section class="material-preview-viewport" aria-label="Interactive 3D preview"><div class="preview-camera-bar" role="group" aria-label="Camera views">${[['reset', 'Reset view', 'rotate'], ['fit', 'Fit to model', 'preview-fit'], ['top', 'Top view', 'view-top'], ['back', 'Back view', 'view-back'], ['front', 'Front view', 'view-front'], ['left', 'Left view', 'view-left'], ['right', 'Right view', 'view-right'], ['iso', 'Isometric view', 'view-iso']].map(([view, label, i]) => `<button type="button" class="panel-icon" data-preview-camera="${view}" aria-label="${label}" title="${label}">${icon(i)}</button>`).join('')}<span data-preview-view>Top</span></div><div class="material-preview-stage" data-preview-stage><div class="material-preview-message" role="status" data-preview-message>Preparing preview…</div></div></section>
- <aside class="material-preview-settings" aria-label="Preview settings"><h3>Material</h3><label class="preview-field">Material<select class="number-input" aria-label="Material" data-preview-material>${PREVIEW_MATERIALS.map(m => `<option value="${m.id}">${m.name}</option>`).join('')}</select></label>${field('thickness', 'Thickness', 3, .1, 100)}
- <h3>Processes</h3><p class="subtext">Closed Cut paths form through-cut parts and holes.</p>${field('vectorDepth', 'Vector engraving depth', .2, 0, 3)}${field('rasterDepth', 'Raster engraving depth', .2, 0, 3)}${field('openCutDepth', 'Open cut depth', .2, 0, 3)}<p class="subtext">Filled engraving recesses the entire area. Open cuts use a 0.15 mm groove. Depth at the sheet thickness cuts through.</p>
- <h3>Appearance</h3><label class="preview-check"><input type="checkbox" data-preview-artwork>Artwork colours</label><p class="subtext">Overlay Artwork colours, gradients and patterns on the remaining material.</p><p class="preview-error" data-preview-error role="alert" hidden></p></aside></div>
- <footer class="export-footer material-preview-footer"><span data-preview-status role="status">Preparing preview…</span><span>Drag to rotate · Middle/right or Shift-drag to pan · Scroll or Ctrl-drag to zoom</span></footer>`;
+    dialog.innerHTML = `<header class="export-header"><div><h2 id="material-preview-title">Material &amp; process preview</h2></div><button type="button" class="tool" data-preview-close aria-label="Close preview" title="Close preview">${icon('close')}</button></header>
+ <div class="material-preview-body"><section class="material-preview-viewport" aria-label="Interactive 3D preview"><div class="preview-camera-bar" role="group" aria-label="Camera views">${[['reset', 'Reset view', 'rotate'], ['fit', 'Fit to model', 'preview-fit'], ['top', 'Top view', 'view-top'], ['back', 'Back view', 'view-back'], ['front', 'Front view', 'view-front'], ['left', 'Left view', 'view-left'], ['right', 'Right view', 'view-right'], ['iso', 'Isometric view', 'view-iso']].map(([view, label, i]) => `<button type="button" class="panel-icon" data-preview-camera="${view}" aria-label="${label}" title="${label}">${icon(i)}</button>`).join('')}</div><div class="material-preview-stage" data-preview-stage><span class="preview-view" data-preview-view>Top</span><div class="material-preview-message" role="status" data-preview-message>Preparing preview…</div></div></section>
+ <aside class="material-preview-settings" aria-label="Preview settings"><h3>Material</h3><div class="preview-material-actions"><button type="button" class="button" data-material-upload>${icon('image')}Upload material</button><button type="button" class="panel-icon" data-material-remove aria-label="Remove custom material" title="Remove custom material" hidden>${icon('delete')}</button><input type="file" data-material-file accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,.bmp" aria-label="Upload material image" hidden></div><p class="preview-material-upload-status" data-material-upload-status role="status" hidden>Loading texture…</p><p class="preview-error" data-material-upload-error role="alert" hidden></p><fieldset class="preview-material-picker"><legend class="sr-only">Material</legend><div class="preview-material-grid">${PREVIEW_MATERIALS.map((m, i) => `<label class="preview-material-option"><input class="preview-material-input" type="radio" name="${materialGroup}" value="${m.id}" data-preview-material ${i === 0 ? 'checked' : ''}><span class="preview-material-tile"><span class="preview-material-sample" style="--material-base:${m.base}"><img data-material-sample="${m.id}" alt="" hidden></span><span class="preview-material-name">${m.name}</span></span></label>`).join('')}</div></fieldset><div class="preview-material-finish" role="group" aria-label="Material finish">${finishSlider(materialGroup, 'metalness', 'Metallic', 0)}${finishSlider(materialGroup, 'roughness', 'Roughness', 85)}</div>${field('thickness', 'Thickness', 3, .1, 100)}
+ <h3>Processes</h3>${field('vectorDepth', 'Vector engraving depth', .2, 0, 3)}${field('rasterDepth', 'Raster engraving depth', .2, 0, 3)}${field('openCutDepth', 'Open cut depth', .2, 0, 3)}
+ <h3>Appearance</h3><label class="preview-check"><input type="checkbox" data-preview-artwork>Artwork colours</label><p class="preview-error" data-preview-error role="alert" hidden></p></aside></div>
+ <footer class="export-footer material-preview-footer"><span data-preview-status role="status">Preparing preview…</span></footer>`;
     document.body.append(dialog);
     return dialog;
 }
@@ -45,6 +51,11 @@ export class MaterialPreview {
     private modelSettings = { ...this.settings };
     private pendingSettings = { ...this.settings };
     private material = 'wood';
+    private finishes = new Map<string, MaterialFinish>();
+    private customMaterials = new Map<string, PreviewMaterial>();
+    private customSamples = new Map<string, string>();
+    private customSequence = 0;
+    private materialUploadRevision = 0;
     private overlay = false;
     constructor(private trigger: HTMLButtonElement, private getInput: () => Promise<MaterialPreviewInput>) {
         this.observer = new ResizeObserver(() => this.resize());
@@ -55,8 +66,121 @@ export class MaterialPreview {
         this.dialog.querySelectorAll<HTMLInputElement>('[data-preview-setting]').forEach(input=>{
             input.oninput=()=>this.readSettings(input.dataset.previewSetting==='thickness');
         });
-        this.get<HTMLSelectElement>('[data-preview-material]').onchange = () => { this.material = this.get<HTMLSelectElement>('[data-preview-material]').value; void this.rebuildSurface(); };
+        this.get('.preview-material-picker').onchange = event => {
+            const input = event.target;
+            if (input instanceof HTMLInputElement && input.matches('[data-preview-material]') && input.checked) this.selectMaterial(input.value);
+        };
+        const materialFile = this.get<HTMLInputElement>('[data-material-file]');
+        this.get('[data-material-upload]').onclick = () => materialFile.click();
+        materialFile.onchange = () => { const file = materialFile.files?.[0]; materialFile.value = ''; if (file) void this.uploadMaterial(file); };
+        this.get('[data-material-remove]').onclick = () => this.removeCustomMaterial();
+        this.dialog.querySelectorAll<HTMLInputElement>('[data-preview-finish]').forEach(input => {
+            input.oninput = () => {
+                const value = input.valueAsNumber / 100;
+                if (!Number.isFinite(value)) return;
+                const key = input.dataset.previewFinish as keyof MaterialFinish;
+                this.finishes.set(this.material, { ...this.materialFinish(), [key]: Math.max(0, Math.min(1, value)) });
+                this.updateFinishControls();
+                this.applyFinish();
+                this.requestRender();
+            };
+        });
+        this.updateFinishControls();
         this.get<HTMLInputElement>('[data-preview-artwork]').onchange = () => { this.overlay = this.get<HTMLInputElement>('[data-preview-artwork]').checked; void this.rebuildSurface(); };
+    }
+    private selectedMaterial(): PreviewMaterial {
+        return this.customMaterials.get(this.material) ?? PREVIEW_MATERIALS.find(material => material.id === this.material) ?? PREVIEW_MATERIALS[0];
+    }
+    private selectMaterial(id: string): void {
+        this.material = id;
+        this.get('[data-material-remove]').hidden = !this.customMaterials.has(id);
+        this.updateFinishControls();
+        void this.rebuildSurface();
+    }
+    private async uploadMaterial(file: File): Promise<void> {
+        const revision = ++this.materialUploadRevision, opening = this.opening;
+        const active = () => revision === this.materialUploadRevision && opening === this.opening && this.dialog.open;
+        const button = this.get<HTMLButtonElement>('[data-material-upload]'), error = this.get('[data-material-upload-error]');
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+        error.hidden = true;
+        this.get('[data-material-upload-status]').hidden = false;
+        let material: PreviewMaterial | undefined, retained = false;
+        try {
+            if (this.customMaterials.size >= 12) throw new Error('Remove a custom material before adding more (12 per session).');
+            material = await customPreviewMaterial(file, `custom-${++this.customSequence}`);
+            if (!active() || !this.renderer || !this.environment) return;
+            const sample = materialPreviewSamples(this.renderer, this.environment.texture, [material])[material.id];
+            const card = this.get<HTMLLabelElement>('.preview-material-option').cloneNode(true) as HTMLLabelElement;
+            const radio = card.querySelector<HTMLInputElement>('[data-preview-material]')!, image = card.querySelector<HTMLImageElement>('img')!;
+            radio.checked = radio.defaultChecked = false;
+            radio.value = material.id;
+            image.dataset.materialSample = material.id;
+            image.src = sample;
+            image.hidden = false;
+            card.querySelector<HTMLElement>('.preview-material-sample')!.style.setProperty('--material-base', material.base);
+            card.querySelector<HTMLElement>('.preview-material-name')!.textContent = material.name;
+            card.title = material.name;
+            this.customMaterials.set(material.id, material);
+            this.customSamples.set(material.id, sample);
+            this.get('.preview-material-grid').append(card);
+            retained = true;
+            radio.checked = true;
+            this.selectMaterial(material.id);
+            radio.focus({ preventScroll: true });
+            radio.scrollIntoView({ block: 'nearest' });
+        } catch (cause) {
+            if (active()) {
+                error.textContent = cause instanceof Error ? cause.message : 'This texture image could not be opened.';
+                error.hidden = false;
+            }
+        } finally {
+            if (material?.image && !retained) material.image.width = material.image.height = 0;
+            if (revision === this.materialUploadRevision) {
+                button.disabled = false;
+                button.removeAttribute('aria-busy');
+                this.get('[data-material-upload-status]').hidden = true;
+            }
+        }
+    }
+    private removeCustomMaterial(): void {
+        const material = this.customMaterials.get(this.material);
+        if (!material) return;
+        this.dialog.querySelector<HTMLInputElement>('[data-preview-material]:checked')?.closest('.preview-material-option')?.remove();
+        this.customMaterials.delete(material.id);
+        this.customSamples.delete(material.id);
+        this.finishes.delete(material.id);
+        if (material.image) material.image.width = material.image.height = 0;
+        this.get<HTMLInputElement>('[data-preview-material][value="wood"]').checked = true;
+        this.selectMaterial('wood');
+        this.get('[data-material-upload-error]').hidden = true;
+        this.get('[data-material-upload]').focus();
+    }
+    private materialFinish(): MaterialFinish {
+        const preset = this.selectedMaterial();
+        return this.finishes.get(this.material) ?? { metalness: preset.metalness, roughness: preset.roughness };
+    }
+    private updateFinishControls(): void {
+        const finish = this.materialFinish();
+        this.dialog.querySelectorAll<HTMLInputElement>('[data-preview-finish]').forEach(input => {
+            const key = input.dataset.previewFinish as keyof MaterialFinish, percent = Math.round(finish[key] * 100);
+            input.value = String(percent);
+            input.setAttribute('aria-valuetext', `${percent}%`);
+            input.style.setProperty('--range-progress', `${percent}%`);
+            this.get(`[data-preview-finish-output="${key}"]`).textContent = `${percent}%`;
+        });
+    }
+    private applyFinish(root: THREE.Object3D = this.root): void {
+        const finish = this.materialFinish();
+        root.traverse(object => {
+            const mesh = object as THREE.Mesh;
+            for (const material of Array.isArray(mesh.material) ? mesh.material : mesh.material ? [mesh.material] : []) {
+                if (material instanceof THREE.MeshPhysicalMaterial) {
+                    material.metalness = finish.metalness;
+                    material.roughness = finish.roughness;
+                }
+            }
+        });
     }
     private get<T extends HTMLElement = HTMLElement>(selector: string): T { return this.dialog.querySelector<T>(selector)!; }
     async open(): Promise<void> {
@@ -93,6 +217,11 @@ export class MaterialPreview {
             room.dispose();
             pmrem.dispose();
             this.scene.environment = this.environment.texture;
+            const samples = materialPreviewSamples(this.renderer, this.environment.texture);
+            this.dialog.querySelectorAll<HTMLImageElement>('[data-material-sample]').forEach(image => {
+                image.src = this.customSamples.get(image.dataset.materialSample!) ?? samples[image.dataset.materialSample!];
+                image.hidden = false;
+            });
             this.controls = new OrbitControls(this.camera, canvas);
             this.controls.enableDamping = true;
             this.controls.dampingFactor = .1;
@@ -182,11 +311,12 @@ export class MaterialPreview {
             return;
         const revision = ++this.surfaceRevision, model = this.model, settings = { ...this.modelSettings };
         try {
-            const root = await previewAssembly(this.input, model, settings, this.material, this.overlay);
+            const root = await previewAssembly(this.input, model, settings, this.selectedMaterial(), this.overlay);
             if (revision !== this.surfaceRevision || !this.dialog.open) {
                 disposePreview(root);
                 return;
             }
+            this.applyFinish(root);
             const first = !this.root.children.length;
             this.scene.remove(this.root);
             disposePreview(this.root);
@@ -371,5 +501,5 @@ export class MaterialPreview {
         });
     }
     private message(text: string): void { const message = this.get('[data-preview-message]'); message.textContent = text; message.hidden = false; }
-    private close(): void { this.cameraMotion = null; ++this.opening; ++this.revision; ++this.surfaceRevision; clearTimeout(this.timer); cancelAnimationFrame(this.frame); this.frame = 0; this.lastFrameTime = 0; this.observer.disconnect(); this.themeObserver.disconnect(); this.worker?.terminate(); this.worker = null; this.controls?.dispose(); this.controls = null; disposePreview(this.scene); this.environment?.dispose(); this.environment = null; this.renderer?.dispose(); this.renderer?.forceContextLoss(); this.renderer?.domElement.remove(); this.renderer = null; this.root = new THREE.Group(); this.grid = null; this.model = null; this.input = null; this.trigger.setAttribute('aria-expanded', 'false'); this.trigger.focus(); }
+    private close(): void { ++this.materialUploadRevision; this.get<HTMLButtonElement>('[data-material-upload]').disabled = false; this.get('[data-material-upload]').removeAttribute('aria-busy'); this.get('[data-material-upload-status]').hidden = true; this.cameraMotion = null; ++this.opening; ++this.revision; ++this.surfaceRevision; clearTimeout(this.timer); cancelAnimationFrame(this.frame); this.frame = 0; this.lastFrameTime = 0; this.observer.disconnect(); this.themeObserver.disconnect(); this.worker?.terminate(); this.worker = null; this.controls?.dispose(); this.controls = null; disposePreview(this.scene); this.environment?.dispose(); this.environment = null; this.renderer?.dispose(); this.renderer?.forceContextLoss(); this.renderer?.domElement.remove(); this.renderer = null; this.root = new THREE.Group(); this.grid = null; this.model = null; this.input = null; this.trigger.setAttribute('aria-expanded', 'false'); this.trigger.focus(); }
 }

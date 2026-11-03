@@ -16,12 +16,23 @@ export class ToolSearch {
   constructor(private trigger:HTMLButtonElement,private tools:SearchTool[],private beforeOpen:()=>boolean,private onError:(message:string)=>void){
     this.dialog.id='tool-search-dialog';this.dialog.className='tool-search-dialog menu-surface';this.dialog.setAttribute('aria-label','Search tools');
     this.dialog.innerHTML='<div class="tool-search-header"><div class="search-shell"><svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-search"/></svg><input class="search-input" type="search" aria-label="Search tools" placeholder="Search tools…" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="tool-search-results" aria-describedby="tool-search-status"></div><button type="button" class="tool tool-search-close" aria-label="Close tool search" title="Close (Esc)"><svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-close"/></svg></button></div><div class="tool-search-results" id="tool-search-results" role="listbox" aria-label="Tools"></div><p class="tool-search-status" id="tool-search-status" role="status"></p>';
-    document.body.append(this.dialog);
+    (trigger.closest('.top-toolbar')??document.body).append(this.dialog);
     this.input=this.dialog.querySelector('input')!;this.results=this.dialog.querySelector('.tool-search-results')!;this.status=this.dialog.querySelector('.tool-search-status')!;
     trigger.addEventListener('click',()=>this.open());
     this.dialog.querySelector('button')!.addEventListener('click',()=>this.dialog.close());
     this.input.addEventListener('input',()=>{this.active=0;this.render();});
-    this.dialog.addEventListener('click',event=>{if(event.target!==this.dialog)return;const r=this.dialog.getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)this.dialog.close();});
+    window.addEventListener('resize',()=>{if(this.dialog.open)this.position();});
+    window.addEventListener('scroll',()=>{if(this.dialog.open)this.position();},true);
+    document.addEventListener('pointerdown',event=>{
+      if(this.dialog.open&&!this.dialog.contains(event.target as Node)){
+        this.restoreFocus=false;this.dialog.close();
+      }
+    });
+    document.addEventListener('focusin',event=>{
+      if(this.dialog.open&&!this.dialog.contains(event.target as Node)&&event.target!==this.trigger){
+        this.restoreFocus=false;this.dialog.close();
+      }
+    });
     this.dialog.addEventListener('keydown',event=>{
       event.stopPropagation();
       if(event.isComposing)return;
@@ -38,8 +49,18 @@ export class ToolSearch {
   }
   private open():void {
     if(this.dialog.open||document.querySelector('dialog[open]')||!this.beforeOpen())return;
-    this.restoreFocus=true;this.input.value='';this.active=0;this.render();this.dialog.showModal();
+    this.restoreFocus=true;this.input.value='';this.active=0;this.render();this.position();this.dialog.show();
     this.trigger.classList.add('selected');this.trigger.setAttribute('aria-expanded','true');this.input.focus();this.results.scrollTop=0;
+  }
+  private position():void {
+    const toolbar=this.trigger.closest<HTMLElement>('.top-toolbar');if(!toolbar)return;
+    const bar=toolbar.getBoundingClientRect(),anchor=this.trigger.getBoundingClientRect();
+    const actions=toolbar.querySelector<HTMLElement>('.toolbar-actions')?.getBoundingClientRect();
+    const right=Math.min(bar.right-4,actions?actions.left-4:bar.right-4);
+    let left=anchor.left,width=Math.min(280,right-left);
+    if(width<200){left=Math.max(bar.left+4,anchor.right-240);width=anchor.right-left;}
+    this.dialog.style.left=`${left-bar.left}px`;this.dialog.style.top=`${anchor.top-bar.top}px`;
+    this.dialog.style.width=`${width}px`;this.dialog.style.setProperty('--tool-search-control-height',`${anchor.height}px`);
   }
   private render():void {
     const words=this.input.value.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
@@ -54,7 +75,7 @@ export class ToolSearch {
       row.addEventListener('pointermove',()=>{this.active=index;this.highlight(false);});
       row.onclick=()=>this.execute(tool);this.results.append(row);
     }
-    this.status.textContent=this.matches.length?`${this.matches.length} tools · ↑ ↓ to browse · Enter to choose · Esc to close`:'No tools found. Try a tool name, such as “circle” or “export”.';
+    this.status.textContent=this.matches.length?`${this.matches.length} tools`:'No tools found.';
     this.highlight();this.results.scrollTop=0;
   }
   private highlight(scroll=true):void {

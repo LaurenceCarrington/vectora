@@ -20,7 +20,7 @@ import type {ShapeOperation} from './shapeOperationGeometry';
 import type { Family } from './generators/catalog';
 import { HelpGuide } from './help';
 import { ToolSearch, type SearchTool } from './toolSearch';
-import { GRID_NAMES, GRID_HELP, type GridType } from './gridGeometry';
+import { GRID_NAMES, type GridType } from './gridGeometry';
 import { initializeThemeControls } from './theme';
 import { CanvasRulers } from './rulers';
 import { alignPopoutWithTrigger } from './menuPosition';
@@ -217,7 +217,7 @@ function updateGridSettings():void {
   gridSize.setAttribute('aria-invalid','false');gridSize.closest('.number-shell')!.classList.remove('is-invalid');
   $('#pref-grid-angle-field').hidden=editor.grid.type!=='polar';
   $('#pref-grid-size-field').hidden=editor.grid.type==='none';
-  $('#pref-grid-size-help').textContent=gridSize.value!==''&&gridSize.validity.valid?GRID_HELP[editor.grid.type]:'Enter a grid size from 0.1 to 1000 mm.';
+  $('#pref-grid-size-help').textContent=gridSize.value!==''&&gridSize.validity.valid?'Space between grid lines.':'Enter a grid size from 0.1 to 1000 mm.';
 }
 gridType.onchange=()=>{editor.setGridType(gridType.value as GridType);updateGridSettings();};
 gridAngle.onchange=()=>editor.setGridAngle(Number(gridAngle.value));
@@ -226,7 +226,7 @@ gridSize.onchange=()=>{
   const valid=gridSize.value!==''&&gridSize.checkValidity();
   gridSize.setAttribute('aria-invalid',String(!valid));
   gridSize.closest('.number-shell')!.classList.toggle('is-invalid',!valid);
-  $('#pref-grid-size-help').textContent=valid?GRID_HELP[editor.grid.type]:'Enter a grid size from 0.1 to 1000 mm.';
+  $('#pref-grid-size-help').textContent=valid?'Space between grid lines.':'Enter a grid size from 0.1 to 1000 mm.';
   if(valid)editor.setGridSpacing(gridSize.valueAsNumber);
 };
 for(const input of document.querySelectorAll<HTMLInputElement>('[data-object-snap]'))input.onchange=()=>editor.setObjectSnap(input.dataset.objectSnap as ObjectSnapMode,input.checked);
@@ -325,7 +325,6 @@ function update():void {
   else if(lastFillPaint!==JSON.stringify(editor.fillPaint))colourPanel.setAppearance(editor.fillPaint);
   lastFillPaint=JSON.stringify(editor.fillPaint);
   colourPanel.setNoFill(editor.noFill);
-  colourPanel.hint(colourItems.length?`Colours ${colourItems.length} selected Artwork ${colourItems.length===1?'object':'objects'} and sets the Fill tool colour.`:'New fills always go into Artwork. Cut, Engrave and Construction keep their layer colours.');
   for(const button of arrangementButtons){
     const action=button.dataset.arrange as ArrangementAction,distribute=action.startsWith('distribute-');
     button.disabled=!editor.canArrangeSelection(action);
@@ -380,7 +379,7 @@ function update():void {
   layersPanel.render();
   updateSelectionMenu();selectionContextMenu.refresh();
   snappingMaster.checked=editor.snappingEnabled;gridSnapSetting.checked=editor.snapToGridEnabled;gridSnapSetting.disabled=editor.grid.type==='none';
-  $('#pref-snap-grid-help').textContent=editor.grid.type==='none'?'Choose a grid type in Grid preferences to enable grid snapping.':'Align to the grid size set in Grid preferences.';
+  $('#pref-snap-grid-help').textContent=editor.grid.type==='none'?'Choose a grid to enable snapping.':'Align points to the grid.';
   document.querySelectorAll<HTMLInputElement>('[data-object-snap]').forEach(input=>input.checked=editor.objectSnapModes[input.dataset.objectSnap as ObjectSnapMode]);
 }
 for(const id of ['field-x','field-y','field-width','field-height','field-line-weight','arc-radius','text-property-size'])bindLength($<HTMLInputElement>('#'+id));
@@ -484,7 +483,7 @@ searchTools.push(
 for(const [tab,label,keywords] of [
  ['grid','Grid settings','square isometric polar radial hexagonal triangular dot step no grid spacing size mm angle'],
  ['snapping','Snapping settings','intersection nearest centre center tangent perpendicular object snap grid'],
- ['appearance','Appearance','theme dark light high contrast accessibility mode'],
+ ['appearance','Appearance','theme system dark light mode accent colour color'],
 ] as const)searchTools.push({id:`settings-${tab}`,label,group:'Preferences',icon:'gear',keywords,run:()=>{$<HTMLButtonElement>('[data-open-preferences]').click();$<HTMLButtonElement>(`[data-pref-tab="${tab}"]`).click();$(`[data-pref-tab="${tab}"]`).focus();}});
 for(const [format,label] of [['svg','Export SVG'],['pdf','Export PDF'],['png','Export PNG'],['dxf','Export DXF'],['laser','Laser-compatible DXF']] as const)searchTools.push({id:`export-${format}`,label,group:'File',icon:format==='laser'?'export-dxf':`export-${format}`,keywords:'export download format legacy r12 laser cutter',run:()=>exportDialog.open(format as ExportFormat)});
 searchTools.push({id:'font',label:'Font and text size',group:'Properties',icon:'text',keywords:'fonts lettering lato hershey relief freemono inter jetbrains oswald montserrat bebas allerta saira',unavailable:()=>editor.selected?.data.text?undefined:'Select a text object',run:()=>{setPanel(props,true);textFontSelect.focus();}});

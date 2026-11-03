@@ -45,8 +45,8 @@ export class RasterToVector {
     if(this.dialog.open)return;this.beforeOpen();this.stop();this.source=null;this.result=null;this.filename='';this.mode='outline';this.settings={...DEFAULT_TRACE_SETTINGS};this.showBinary=true;
     this.get<HTMLInputElement>('[value="outline"]').checked=true;this.scale.value='0.25';this.get<HTMLInputElement>('#raster-invert').checked=false;
     this.dialog.querySelectorAll<HTMLInputElement>('[data-trace-setting]').forEach(input=>{input.value=String(this.settings[input.dataset.traceSetting as Exclude<keyof RasterTraceSettings,'invert'>]);this.updateSlider(input);});
-    this.binaryCanvas.width=0;this.get('#raster-filename').textContent='Choose an image to trace.';this.get('#raster-detail').textContent='Images are processed on your device.';
-    this.status.textContent='Choose an image to begin.';this.get('#raster-vector-surface').setAttribute('aria-busy','false');this.error.hidden=true;this.updateMode();this.updateInputView();this.clearPreview('No traceable paths');this.updateAdd();this.dialog.showModal();this.get<HTMLButtonElement>('#raster-input').focus();
+    this.binaryCanvas.width=0;this.get('#raster-filename').textContent='No image';this.get('#raster-detail').textContent='';
+    this.status.textContent='';this.get('#raster-vector-surface').setAttribute('aria-busy','false');this.error.hidden=true;this.updateMode();this.updateInputView();this.clearPreview('No traceable paths');this.updateAdd();this.dialog.showModal();this.get<HTMLButtonElement>('#raster-input').focus();
   }
   private updateSlider(input:HTMLInputElement):void{
     const value=input.dataset.traceSetting==='colourSmoothing'?['Off','Light','Heavy'][input.valueAsNumber]:input.value;
@@ -61,7 +61,6 @@ export class RasterToVector {
     this.dialog.querySelectorAll<HTMLElement>('[data-colour-control]').forEach(element=>element.hidden=!colour);
     this.get('[data-raster-view="binary"]').textContent=colour?'Adjusted':'Binary';
     this.binaryCanvas.setAttribute('aria-label',colour?'Adjusted colour image preview':'Binary image preview');
-    this.get('.raster-help').textContent=colour?'Trace into separate filled Artwork regions. Smoothing matches Colour by Numbers; shared boundaries and holes stay editable.':'Trace dark areas into one colour. Curves and corners stay editable.';
   }
   private updateInputView():void{
     this.get('#raster-input').setAttribute('aria-label',this.source?'Replace image':'Choose an image');
@@ -81,7 +80,7 @@ export class RasterToVector {
       const scale=Math.min(1,1600/Math.max(bitmap.width,bitmap.height)),canvas=this.sourceCanvas;
       canvas.width=Math.max(1,Math.round(bitmap.width*scale));canvas.height=Math.max(1,Math.round(bitmap.height*scale));
       const context=canvas.getContext('2d',{willReadFrequently:true})!;context.imageSmoothingEnabled=true;context.imageSmoothingQuality='high';context.clearRect(0,0,canvas.width,canvas.height);context.drawImage(bitmap,0,0,canvas.width,canvas.height);this.source=context.getImageData(0,0,canvas.width,canvas.height);this.filename=file.name;
-      this.get('#raster-filename').textContent=file.name;this.get('#raster-detail').textContent=`${canvas.width} × ${canvas.height} trace pixels${scale<1?' · Scaled to 1600px':''} · Processed locally`;
+      this.get('#raster-filename').textContent=file.name;this.get('#raster-detail').textContent=`${canvas.width} × ${canvas.height} trace pixels${scale<1?' · Scaled to 1600px':''}`;
       this.updateInputView();this.startWorker();this.trace();
     }catch(error){if(revision===this.revision)this.fail(error instanceof Error?error.message:'This image could not be opened.');}
     finally{bitmap?.close();}
@@ -97,7 +96,7 @@ export class RasterToVector {
       const previewPaths=result.mode==='colour'?paths:[{svg:traceSVGPath(paths),fill:result.mode==='fill'?this.editor.drawingColor:'none'}];
       this.svg.replaceChildren(...previewPaths.map(trace=>{const path=document.createElementNS('http://www.w3.org/2000/svg','path');path.setAttribute('d',trace.svg);path.setAttribute('fill',trace.fill??'none');path.setAttribute('stroke',result.mode==='colour'||result.mode==='fill'?'none':this.editor.drawingColor);path.setAttribute('fill-rule','evenodd');path.setAttribute('stroke-width','1.5');path.setAttribute('vector-effect','non-scaling-stroke');path.setAttribute('stroke-linecap','round');path.setAttribute('stroke-linejoin','round');return path;}));
       this.svg.toggleAttribute('hidden',!paths.length);this.get('#raster-vector-empty').hidden=!!paths.length;this.get('#raster-vector-empty').textContent='No traceable paths';this.get('#raster-vector-surface').setAttribute('aria-busy','false');this.get('#raster-path-count').textContent=`${paths.length} ${paths.length===1?'path':'paths'}`;
-      this.status.textContent=paths.length?`${result.foregroundPixels.toLocaleString()} source pixels · ${result.pointCount.toLocaleString()} ${result.mode==='centerline'?'skeleton nodes':result.mode==='colour'?'boundary points':'fitted points'} · ${Math.round(response.elapsedMs)} ms`:'No traceable paths. Adjust the image settings or choose another image.';
+      this.status.textContent=paths.length?`${result.foregroundPixels.toLocaleString()} source pixels · ${result.pointCount.toLocaleString()} ${result.mode==='centerline'?'skeleton nodes':result.mode==='colour'?'boundary points':'fitted points'} · ${Math.round(response.elapsedMs)} ms`:'No traceable paths.';
       this.updateAdd();
     };
     worker.onerror=event=>{if(this.worker!==worker)return;event.preventDefault();worker.terminate();this.worker=null;this.fail('The trace could not finish. Choose the image again to retry.');};

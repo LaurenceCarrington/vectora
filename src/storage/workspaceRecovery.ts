@@ -74,7 +74,6 @@ export class RecoveryChooser {
  choose(entries:RecoveryWorkspace[],newWindow:boolean):Promise<string|null>{
   if(this.dialog.open)return Promise.resolve(null);
   const d=this.dialog;d.replaceChildren();const title=document.createElement('h2');title.id='recovery-workspaces-title';title.textContent='Browser recovery';d.append(title);
-  const intro=document.createElement('p');intro.textContent=newWindow?'Open a retained workspace in a separate window. Your current drawing stays here.':'Choose a retained workspace, or start without restoring. Other copies are kept.';d.append(intro);
   const list=document.createElement('div');list.className='recovery-workspace-list';d.append(list);
   return new Promise(resolve=>{
    const finish=(id:string|null)=>{d.close();resolve(id);};

@@ -57,7 +57,7 @@ export class ObjectCreation {
   this.destination=document.createElement('p');this.destination.className='subtext creation-destination';this.element.append(this.destination);
   this.error=document.createElement('p');this.error.className='creation-error';this.error.setAttribute('role','status');this.error.hidden=true;this.element.append(this.error);
   this.submitButton=document.createElement('button');this.submitButton.type='submit';this.submitButton.className='button creation-submit';this.submitButton.innerHTML='<svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-plus"/></svg>Add to canvas';this.element.append(this.submitButton);
-  const note=document.createElement('p');note.className='subtext';note.textContent='You can also draw directly on the canvas. Typed values are exact and bypass snapping.';this.element.append(note);this.sync();
+  this.sync();
  }
  sync():boolean {
   const context=this.model.context();

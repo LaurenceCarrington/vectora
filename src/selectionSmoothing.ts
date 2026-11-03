@@ -20,7 +20,7 @@ export class SelectionSmoothing {
  private mover:MovablePopover;
  constructor(private editor:CADEditor,private hooks:{changed:()=>void;commit:(before:DocumentSnapshot)=>void}){
   this.panel.className='smooth-popover menu-surface';this.panel.hidden=true;this.panel.setAttribute('role','dialog');this.panel.setAttribute('aria-label','Smooth selected objects');
-  this.panel.innerHTML='<div class="smooth-header"><h2>Smooth</h2><button type="button" class="panel-icon" aria-label="Close Smooth" title="Close"><svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-close"/></svg></button></div><div class="smooth-controls"><div class="slider-label"><label for="smooth-strength">Smoothing strength</label><output for="smooth-strength">0%</output></div><input id="smooth-strength" class="vectora-slider" type="range" min="0" max="100" step="1" value="0"><div class="slider-label"><label for="smooth-detail">Detail reduction</label><output for="smooth-detail">0 mm</output></div><input id="smooth-detail" class="vectora-slider" type="range" min="0" max="2" step="0.05" value="0"><p class="smooth-hint">Preserves sharp corners and endpoints. Undo restores each adjustment.</p></div>';
+  this.panel.innerHTML='<div class="smooth-header"><h2>Smooth</h2><button type="button" class="panel-icon" aria-label="Close Smooth" title="Close"><svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-close"/></svg></button></div><div class="smooth-controls"><div class="slider-label"><label for="smooth-strength">Smoothing strength</label><output for="smooth-strength">0%</output></div><input id="smooth-strength" class="vectora-slider" type="range" min="0" max="100" step="1" value="0"><div class="slider-label"><label for="smooth-detail">Detail reduction</label><output for="smooth-detail">0 mm</output></div><input id="smooth-detail" class="vectora-slider" type="range" min="0" max="2" step="0.05" value="0"><p class="smooth-hint" role="status"></p></div>';
   this.strength=this.panel.querySelector('#smooth-strength')!;this.detail=this.panel.querySelector('#smooth-detail')!;
   this.mover=new MovablePopover(this.panel,this.panel.querySelector('.smooth-header h2')!,'Move Smooth menu',()=>this.position());
   editor.canvas.parentElement!.append(this.panel);
@@ -53,7 +53,7 @@ export class SelectionSmoothing {
     source.topology=contourTopology(source.paths.map(p=>p.base));
    }
   }catch(error){this.sources.forEach(s=>s.paths.forEach(p=>p.base.remove()));this.sources=[];this.editor.onMessage(`Unable to smooth this selection: ${(error as Error).message}`,true);this.editor.canvas.focus({preventScroll:true});return;}
-  this.anchor=anchor;this.completed={strength:'0',detail:'0'};this.strength.value='0';this.detail.value='0';this.labels();this.panel.querySelector('.smooth-hint')!.textContent='Preserves sharp corners and endpoints. Undo restores each adjustment.';this.panel.hidden=false;this.position();this.strength.focus({preventScroll:true});
+  this.anchor=anchor;this.completed={strength:'0',detail:'0'};this.strength.value='0';this.detail.value='0';this.labels();this.panel.querySelector('.smooth-hint')!.textContent='';this.panel.hidden=false;this.position();this.strength.focus({preventScroll:true});
  }
  refresh():void {
   if(this.panel.hidden||this.updating)return;
@@ -83,7 +83,7 @@ export class SelectionSmoothing {
     }finally{results.forEach(path=>path.remove());}
     owner.data={...structuredClone(data)};if(edited){delete owner.data.arc;delete owner.data.sides;}
    }
-   this.panel.querySelector('.smooth-hint')!.textContent=protectedCount?'Some paths kept unchanged to preserve holes or crossings. Reduce the settings.':'Preserves sharp corners and endpoints. Undo restores each adjustment.';
+   this.panel.querySelector('.smooth-hint')!.textContent=protectedCount?'Some paths kept unchanged to preserve holes or crossings. Reduce the settings.':'';
    this.labels();this.hooks.changed();
   }catch(error){this.rollback();this.editor.onMessage(`Unable to smooth this selection: ${(error as Error).message}`,true);this.close();}
   finally{this.updating=false;}

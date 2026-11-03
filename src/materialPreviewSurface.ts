@@ -1,6 +1,17 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { MaterialPreviewInput, MaterialPreviewModel, ProcessSettings } from './materialPreviewTypes';
+export interface PreviewMaterial {
+    id: string;
+    name: string;
+    base: string;
+    edge: string;
+    mark: string;
+    roughness: number;
+    metalness: number;
+    grain: boolean;
+    image?: HTMLCanvasElement;
+}
 export const PREVIEW_MATERIALS = [
     { id: 'wood', name: 'Birch plywood', base: '#c9a775', edge: '#5d3b22', mark: '#684529', roughness: .85, metalness: 0, grain: true },
     { id: 'mdf', name: 'MDF', base: '#b39266', edge: '#62482e', mark: '#604228', roughness: .95, metalness: 0, grain: false },
@@ -8,22 +19,28 @@ export const PREVIEW_MATERIALS = [
     { id: 'frosted', name: 'Frosted acrylic', base: '#b7d1d4', edge: '#90b5ba', mark: '#ffffff', roughness: .65, metalness: 0, grain: false },
     { id: 'aluminium', name: 'Brushed aluminium', base: '#b5bec7', edge: '#757f89', mark: '#505d65', roughness: .45, metalness: .8, grain: false },
     { id: 'leather', name: 'Natural leather', base: '#aa7248', edge: '#593920', mark: '#4b3022', roughness: .95, metalness: 0, grain: false },
+    { id: 'abs-black', name: 'Black ABS plastic', base: '#25282e', edge: '#17191e', mark: '#777d86', roughness: .55, metalness: 0, grain: false },
+    { id: 'pla-white', name: 'White PLA plastic', base: '#eeeae2', edge: '#c4beb2', mark: '#777268', roughness: .78, metalness: 0, grain: false },
+    { id: 'plastic-red', name: 'Glossy red plastic', base: '#c62d35', edge: '#7d1821', mark: '#f5a6a9', roughness: .18, metalness: 0, grain: false },
+    { id: 'pvc-grey', name: 'Grey PVC', base: '#9ba4ad', edge: '#626b76', mark: '#d8dde2', roughness: .48, metalness: 0, grain: false },
+    { id: 'vinyl-black', name: 'Black vinyl', base: '#181b21', edge: '#101217', mark: '#626b7a', roughness: .22, metalness: 0, grain: false },
+    { id: 'vinyl-white', name: 'White vinyl', base: '#f2f2ef', edge: '#c7c9c5', mark: '#858a87', roughness: .28, metalness: 0, grain: false },
+    { id: 'copper', name: 'Copper', base: '#c9825b', edge: '#8e4c31', mark: '#633c2c', roughness: .26, metalness: 1, grain: false },
+    { id: 'brass', name: 'Brass', base: '#c5a350', edge: '#806327', mark: '#544621', roughness: .3, metalness: 1, grain: false },
 ] as const;
-export function disposePreview(root: THREE.Object3D): void { const geometry = new Set<THREE.BufferGeometry>(), materials = new Set<THREE.Material>(), textures = new Set<THREE.Texture>(); root.traverse(object => { const mesh = object as THREE.Mesh; if (mesh.geometry)
-    geometry.add(mesh.geometry); if (mesh.material)
-    for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
-        materials.add(material);
-        for (const value of Object.values(material))
-            if (value instanceof THREE.Texture)
-                textures.add(value);
-    } }); geometry.forEach(g => g.dispose()); materials.forEach(m => m.dispose()); textures.forEach(t => t.dispose()); root.clear(); }
-export async function previewAssembly(input: MaterialPreviewInput, model: MaterialPreviewModel, settings: ProcessSettings, materialId: string, overlay: boolean): Promise<THREE.Group> {
-    const material = PREVIEW_MATERIALS.find(m => m.id === materialId) ?? PREVIEW_MATERIALS[0], b = model.bounds, canvas = document.createElement('canvas');
-    canvas.width = Math.max(16, Math.round(1024 * b.width / Math.max(b.width, b.height)));
-    canvas.height = Math.max(16, Math.round(1024 * b.height / Math.max(b.width, b.height)));
+/** Shared unmarked material texture for the physical preview and visual material samples. */
+export function previewMaterialCanvas(material: PreviewMaterial, width: number, height: number): HTMLCanvasElement {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
     const ctx = canvas.getContext('2d')!;
     ctx.fillStyle = material.base;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (material.image) {
+        const image = material.image, scale = Math.max(width / image.width, height / image.height);
+        ctx.drawImage(image, (width - image.width * scale) / 2, (height - image.height * scale) / 2, image.width * scale, image.height * scale);
+        return canvas;
+    }
     let seed = 17;
     const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
     if (material.grain)
@@ -41,6 +58,20 @@ export async function previewAssembly(input: MaterialPreviewInput, model: Materi
             ctx.fillStyle = `rgba(255,255,255,${random() * .1})`;
             ctx.fillRect(0, y, canvas.width, 1);
         }
+    return canvas;
+}
+export function disposePreview(root: THREE.Object3D): void { const geometry = new Set<THREE.BufferGeometry>(), materials = new Set<THREE.Material>(), textures = new Set<THREE.Texture>(); root.traverse(object => { const mesh = object as THREE.Mesh; if (mesh.geometry)
+    geometry.add(mesh.geometry); if (mesh.material)
+    for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+        materials.add(material);
+        for (const value of Object.values(material))
+            if (value instanceof THREE.Texture)
+                textures.add(value);
+    } }); geometry.forEach(g => g.dispose()); materials.forEach(m => m.dispose()); textures.forEach(t => t.dispose()); root.clear(); }
+export async function previewAssembly(input: MaterialPreviewInput, model: MaterialPreviewModel, settings: ProcessSettings, materialId: string | PreviewMaterial, overlay: boolean): Promise<THREE.Group> {
+    const material = typeof materialId === 'string' ? PREVIEW_MATERIALS.find(m => m.id === materialId) ?? PREVIEW_MATERIALS[0] : materialId, b = model.bounds;
+    const canvas = previewMaterialCanvas(material, Math.max(16, Math.round(1024 * b.width / Math.max(b.width, b.height))), Math.max(16, Math.round(1024 * b.height / Math.max(b.width, b.height))));
+    const ctx = canvas.getContext('2d')!;
     const backCanvas = document.createElement('canvas');
     backCanvas.width = canvas.width;
     backCanvas.height = canvas.height;
