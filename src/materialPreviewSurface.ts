@@ -14,6 +14,12 @@ export interface PreviewMaterial {
 }
 export const PREVIEW_MATERIALS = [
     { id: 'wood', name: 'Birch plywood', base: '#c9a775', edge: '#5d3b22', mark: '#684529', roughness: .85, metalness: 0, grain: true },
+    { id: 'oak', name: 'Oak', base: '#b99058', edge: '#674326', mark: '#50321c', roughness: .78, metalness: 0, grain: true },
+    { id: 'walnut', name: 'Walnut', base: '#70503b', edge: '#382419', mark: '#251810', roughness: .65, metalness: 0, grain: true },
+    { id: 'maple', name: 'Maple', base: '#e6cf9f', edge: '#967244', mark: '#72502d', roughness: .7, metalness: 0, grain: true },
+    { id: 'cherry', name: 'Cherry', base: '#b8734f', edge: '#713e29', mark: '#4e281b', roughness: .62, metalness: 0, grain: true },
+    { id: 'pine', name: 'Pine', base: '#e1bb76', edge: '#936130', mark: '#684020', roughness: .9, metalness: 0, grain: true },
+    { id: 'bamboo', name: 'Bamboo', base: '#c9ad69', edge: '#82602f', mark: '#59401f', roughness: .6, metalness: 0, grain: true },
     { id: 'mdf', name: 'MDF', base: '#b39266', edge: '#62482e', mark: '#604228', roughness: .95, metalness: 0, grain: false },
     { id: 'acrylic', name: 'Clear acrylic', base: '#b6dbe1', edge: '#84b6c2', mark: '#edf6f8', roughness: .1, metalness: 0, grain: false },
     { id: 'frosted', name: 'Frosted acrylic', base: '#b7d1d4', edge: '#90b5ba', mark: '#ffffff', roughness: .65, metalness: 0, grain: false },

@@ -1374,7 +1374,7 @@ select option:disabled, select optgroup:disabled { color:var(--menu-disabled); }
  .new-document-dialog .export-footer>span { display:none; }
 }
 /* Material & process preview: shell, controls and 3D grid follow the active theme. */
-.material-preview-dialog {width:min(1180px,calc(100vw - 32px));height:min(760px,calc(100dvh - 32px));max-height:calc(100dvh - 32px)}
+.material-preview-dialog {inset:0;margin:auto;width:85vw;height:85dvh;max-height:85dvh}
 .material-preview-body {display:grid;grid-template-columns:minmax(0,1fr) 280px;flex:1;min-height:0;overflow:hidden}
 .material-preview-viewport {margin:0;display:flex;flex-direction:row;min-height:0;min-width:0;background:var(--preview-background);color:var(--preview-foreground)}
 .preview-camera-bar {display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px;flex:0 0 56px;min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;border-right:1px solid var(--preview-border)}
@@ -1431,7 +1431,6 @@ select option:disabled, select optgroup:disabled { color:var(--menu-disabled); }
 .preview-error {font-size:var(--text-xs);line-height:1.5;color:var(--color-danger)}
 .material-preview-footer {font-size:var(--text-xs);gap:8px;flex-wrap:wrap;justify-content:space-between}
 @media(max-width:650px) {
- .material-preview-dialog {width:calc(100vw - 16px);height:calc(100dvh - 16px);max-height:calc(100dvh - 16px)}
  .material-preview-dialog .export-header {padding:12px}
  .material-preview-dialog .export-header h2 {font-size:18px}
  .material-preview-dialog .export-header p {font-size:var(--text-xs)}
@@ -1664,13 +1663,13 @@ input[type="color"]::-moz-color-swatch { border-radius:var(--radius-xs); corner-
 @media(max-height:600px) { .vertical .tool-group-start { margin-top:var(--space-4); } .vertical .tool-group-start::before { display:none; } }
 
 /* Shared action help: keyboard focus and pointer hover use the same top-layer card. */
-.vectora-tooltip { position:fixed; inset:auto; z-index:calc(var(--menu-z-index) + 100); width:max-content; max-width:min(280px,calc(100vw - 16px)); max-height:calc(100dvh - 16px); overflow:auto; margin:0; padding:var(--space-8) var(--space-12); border:1px solid var(--menu-border); border-radius:var(--radius-menu); background:var(--menu-background); color:var(--menu-foreground); box-shadow:var(--menu-shadow); font:var(--text-xs)/16px var(--font-sans); text-align:left; pointer-events:none; }
+.vectora-tooltip { position:fixed; inset:auto; z-index:calc(var(--menu-z-index) + 100); width:max-content; max-width:min(240px,calc(100vw - 16px)); max-height:calc(100dvh - 16px); overflow:auto; margin:0; padding:var(--space-4) var(--space-8); border:1px solid var(--menu-border); border-radius:var(--radius-sm); background:var(--menu-background); color:var(--menu-foreground); box-shadow:var(--menu-shadow); font:11px/14px var(--font-sans); text-align:left; pointer-events:none; }
 .vectora-tooltip[hidden] { display:none; }
 .vectora-tooltip::backdrop { background:transparent; pointer-events:none; }
-.tooltip-heading { display:flex; align-items:baseline; justify-content:space-between; gap:var(--space-16); }
+.tooltip-heading { display:flex; align-items:baseline; justify-content:space-between; gap:var(--space-8); }
 .tooltip-action { min-width:0; overflow-wrap:anywhere; font:inherit; font-weight:600; }
 .vectora-tooltip kbd { flex-shrink:0; color:var(--menu-muted); font:inherit; font-variant-numeric:tabular-nums; white-space:nowrap; }
-.tooltip-description { margin:var(--space-4) 0 0; color:var(--menu-muted); font-size:var(--text-xs); line-height:18px; overflow-wrap:anywhere; }
+.tooltip-description { margin:2px 0 0; color:var(--menu-muted); font-size:inherit; line-height:14px; overflow-wrap:anywhere; }
 .properties-collapse[hidden] { display:none; }
 .properties-collapse { margin-left:auto; }
 .properties-collapse svg { transform:rotate(0deg); }
